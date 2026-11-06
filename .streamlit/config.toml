@@ -1,0 +1,19 @@
+# TIMBER's look (Streamlit reads this file automatically).
+[theme]
+base = "dark"
+primaryColor = "#4cbf7f"            # forest green: buttons, sliders, selected tabs
+backgroundColor = "#0e1411"         # very dark green-black
+secondaryBackgroundColor = "#17211b"
+textColor = "#e6eee8"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"             # hide the developer menu
+
+[server]
+headless = true
+fileWatcherType = "none"
+maxUploadSize = 1000
+
+[browser]
+gatherUsageStats = false

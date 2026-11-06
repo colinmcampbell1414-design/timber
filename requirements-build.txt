@@ -1,0 +1,4 @@
+# Extra packages for the TIMBER desktop app (on top of requirements.txt).
+-r requirements.txt
+pywebview>=5.0      # the app's own desktop window (uses Edge WebView2, built into Windows 10/11)
+pyinstaller>=6.0    # packs Python + all libraries into dist\TIMBER\ so it runs on any Windows PC

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# WebODM exports can be large; keep them out of git
+data/*.tif
+data/*.tiff
+
+# Survey subfolders (data/yard, data/forest, ...)
+data/**/*.tif
+data/**/*.tiff
+
+# TIMBER: saved results, builds, logs
+.timber_cache/
+build/
+dist/
+timber.log
+
+# Claude Code settings (this computer only)
+.claude/

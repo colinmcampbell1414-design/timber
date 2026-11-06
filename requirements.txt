@@ -1,0 +1,21 @@
+# Core app (Phases 1-2)
+streamlit>=1.32
+rasterio>=1.3.9
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+matplotlib>=3.8
+
+# Testing
+pytest>=8.0
+
+# Water flow (Phase 4) uses our own D8 code in terrain/hydrology.py instead of
+# pysheds: pysheds 0.5 crashes with numpy 2.x (it calls the removed np.in1d).
+
+# Phase 5 (Hazards & Applications)
+scikit-image>=0.22                   # watershed segmentation of tree crowns
+streamlit-image-coordinates>=0.4     # clicking points/outlines on the map
+pillow>=10.0                         # drawing the clickable map (already installed with streamlit)
+
+# Interactive maps (TIMBER)
+plotly>=5.20                         # zoomable maps where you can click a tree
