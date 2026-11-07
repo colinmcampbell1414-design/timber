@@ -11,6 +11,16 @@ used for the tree health check.
 > **Screening tool for a student science project. Not a substitute for a
 > professional arborist assessment.**
 
+## Download
+
+**[Download the TIMBER installer for Windows](https://github.com/colinmcampbell1414-design/timber/releases/latest)**
+(`TIMBER-Setup-1.0.0.exe` under *Assets*). Run it: it installs just for you,
+no administrator password needed, and adds TIMBER to the Start menu. Windows
+may say "Windows protected your PC" because the installer isn't signed: click
+**More info → Run anyway**. Then put each WebODM survey (DTM, DSM and
+orthophoto GeoTIFFs) in its own folder inside `Documents\TIMBER\data`, start
+TIMBER, and pick the survey in the sidebar. Needs 64-bit Windows 10 or 11.
+
 TIMBER grew out of the *Drone Terrain Hazard App* (the folder
 `..\terrain-hazard-app`, which is kept unchanged with all 9 hazard tools). This
 folder is TIMBER only: tree fall hazard first, slope stability second, and the
