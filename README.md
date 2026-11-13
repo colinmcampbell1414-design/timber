@@ -14,7 +14,7 @@ used for the tree health check.
 ## Download
 
 **[Download the TIMBER installer for Windows](https://github.com/colinmcampbell1414-design/timber/releases/latest)**
-(`TIMBER-Setup-1.0.0.exe` under *Assets*). Run it: it installs just for you,
+(`TIMBER-Setup-<version>.exe` under *Assets*). Run it: it installs just for you,
 no administrator password needed, and adds TIMBER to the Start menu. Windows
 may say "Windows protected your PC" because the installer isn't signed: click
 **More info → Run anyway**. Then put each WebODM survey (DTM, DSM and
@@ -50,7 +50,7 @@ The sidebar has the page menu and the **survey** picker. Pages:
 | Page | What it is for |
 |---|---|
 | **Home** | What TIMBER does, the current survey at a glance (area, cell size, DSM/photo, pit repair), how to add surveys |
-| **Tree hazard** | The main tool: every tree's hazard score, likely fall direction, fall exposure, features at risk, downed logs, field check |
+| **Tree hazard** | The main tool: every tree's hazard score, likely fall direction, fall exposure, features at risk, downed logs, field check, **storm check** and **design criteria** |
 | **Slope stability** | Steep, wet, water-collecting ground that could slump (the mudslide score) |
 | **Ground check** | Is the ground model believable? Overview (hillshade, heights), Slope, Water flow (the old pages 1, 2 and 4) |
 | **Accuracy checker** | Ground model vs hand-measured check points: the best-case vertical error (the old page 3) |
@@ -124,14 +124,14 @@ the code, run `.\build_exe.ps1` again.
 ## Installer (ready for later)
 
 `installer\TIMBER.iss` is an installer recipe for **Inno Setup 6** (free). To
-make `dist\installer\TIMBER-Setup-1.0.0.exe`:
+make `dist\installer\TIMBER-Setup-1.1.0.exe`:
 
 ```powershell
 winget install JRSoftware.InnoSetup   # once
 .\build_installer.ps1
 ```
 
-The result is `dist\installer\TIMBER-Setup-1.0.0.exe` (about 125 MB; no
+The result is `dist\installer\TIMBER-Setup-1.1.0.exe` (about 125 MB; no
 surveys inside). By default it installs **just for the current user**, so no
 administrator password is needed (handy on school laptops), into
 `%LOCALAPPDATA%\Programs\TIMBER`; an administrator can choose "all users"
@@ -144,6 +144,191 @@ button) and saved results and its log in `%LOCALAPPDATA%\TIMBER`
 (`timber.py`, `user_folders`). Uninstalling never deletes surveys. To release
 a new version, run `.\build_exe.ps1`, change `AppVersion` in
 `installer\TIMBER.iss` (never `AppId`), then run `.\build_installer.ps1`.
+
+## Storm check (Phase 7)
+
+**Why it matters.** A field check asks whether high-hazard trees *look*
+defective. The storm check asks whether they actually *fail*. The same forest
+is flown before and after a real wind storm, and because the scores are
+**frozen before the storm**, this is a true prediction, not a fit made after
+the damage was known. It is the strongest evidence in the project.
+
+It is the **Storm check** part of the Tree hazard page (next to Field check),
+with a **Design criteria** part beside it. Math: `terrain/storm.py` and
+`terrain/validation.py`. Screens: `timber_ui/storm_panel.py`.
+
+### Workflow for one storm
+
+1. **Fly the before survey** and put it in its own folder,
+   `data/forest_YYYY-MM-DD`. Fill in *Flight notes* in the sidebar (date,
+   time, leaves, altitude, overlap); they are saved as `survey.json` in the folder.
+2. **Add the storm** (Storm check → *Add or edit a storm*): a name and the
+   before survey. Storms are kept in `config/storms.yaml`.
+3. **Freeze predictions** with the before survey chosen in the sidebar. This
+   writes, in `results/storms/<storm>/`:
+   - `predictions_frozen.csv`: every tree's position, height, crown, all
+     factors, hazard score, priority, baseline ranks, predicted fall direction,
+     chance of landing on each feature and the chance of falling in each of
+     36 directions;
+   - `settings.json`: every slider value and the code version;
+   - `frozen_grids.npz`: crown outlines, exposure map and feature masks;
+   - `freeze_log.jsonl`: the time and SHA-256 fingerprints of those files.
+   All later analysis only **reads** these files. If one is edited, the
+   fingerprint no longer matches and the analysis refuses to run.
+   *Tip: commit and push `results/storms/<storm>/` to GitHub right after
+   freezing. GitHub's timestamp is independent proof of when the predictions existed.*
+4. **After the storm**, fly again as soon as it is safe, put the survey in
+   `data/forest_YYYY-MM-DD`, and set it as the storm's after survey.
+5. **Wind data.** Download hourly readings for the nearest airport station
+   (ASOS; for example from the Iowa Environmental Mesonet's ASOS download page)
+   as CSV and upload it in the storm editor with the storm's start and end.
+   The app works out the peak gust, the mean wind and the **gust-weighted wind
+   direction**: each reading is an arrow pointing in its direction with length
+   gust², the arrows are added, and the direction of the sum is the answer
+   (so 350° and 10° average to 0°, not 180°).
+6. **Make the actual-wind copy** (in the freeze box). It recomputes only the
+   fall directions with the storm's real wind, from the frozen file, and is
+   labeled "actual-wind prediction". The first copy ("prevailing-wind
+   prediction") is the true forecast; both are reported.
+7. **Run storm analysis.**
+
+### What the analysis does
+
+**Alignment.** Two drone models never line up exactly, so before anything is compared:
+- *Sideways:* phase correlation on the small-scale shape of the surface models
+  (heights, not colors, so lighting doesn't matter) finds the shift to 1/20 of
+  a cell. On big maps the shift is then measured in 100 m blocks; if it changes
+  across the map (the models differ in scale or rotation), a stretch-and-rotate
+  (affine) fit corrects it.
+- *Height:* on stable open ground (low **and smooth** in both surveys, slope
+  under 10°, not a building) a plane is fitted to the difference and removed
+  (offset + tilt).
+- *Bend:* models made without ground control points also bend by different
+  amounts. The typical (median) height difference within 40 m is removed. A
+  median ignores the minority of cells that really changed.
+- Both canopy heights use the **before** ground model: the ground doesn't move
+  in a storm, and each flight's ground model has its own errors under trees.
+- A warning appears if the leftover noise on stable ground is above 0.15 m or
+  the leftover shift above 0.5 m, and every tree is then "uncertain" unless you
+  choose to trust the alignment.
+
+**Change per tree**, inside each frozen crown: `top_drop_m` (old top height −
+highest after canopy within 1.5 m), `crown_loss_frac` (share of crown cells
+that dropped more than the change threshold, default 3 × the stable-ground
+noise, at least 0.5 m) and `volume_loss_frac`. Classes, all with sliders:
+
+| Class | Rule |
+|---|---|
+| fallen | top dropped > 60% of height **and** crown lost > 70% |
+| snapped top | top dropped > max(2 m, 20% of height) |
+| crown damage | crown lost > 25% |
+| no change | otherwise |
+| uncertain | near the map edge, missing after data, or poor alignment (left out of every score) |
+
+**New logs.** The downed-log detector runs on both surveys; a log with no
+match before (center within 2 m, direction within 20°) is new. A new log with
+one end within 1.5 × the crown radius of a fallen tree's trunk belongs to that
+tree, and that end is the **root end**, so the fall direction is fully known
+(root → top), not just an axis.
+
+**Leaf-drop guard.** If the two surveys have different leaf conditions, or the
+typical tree lost over 10% of its crown, a banner says the change looks like
+leaf drop. *Leaf-drop mode* then classifies with the top drop and new logs only.
+
+**Calm control (null test).** Add a pair of flights with no storm between them
+as a storm with *Calm pair* ticked. Every change it finds is a false alarm, so
+it measures the method's noise. Storm results show their change rate next to
+the calm rate with Fisher's exact test.
+
+**Did we predict it?** Using only frozen scores, with uncertain trees left out:
+- **AUC** (the chance a damaged tree had a higher frozen score than an
+  undamaged one; 0.5 = guessing) for the full score, three baselines (tallest
+  first; tallest that can reach a target; random order) and each factor alone,
+  with 95% bootstrap ranges (2000 resamples).
+- Damage rate by hazard class, the high/low ratio and Fisher's exact test.
+- How many damaged trees were in the top 10% and 20% of the frozen ranking.
+- Logistic regression (Newton-Raphson, written out in `validation.py`): the
+  odds of severe damage per 10 hazard points, with log(peak gust) when storms
+  with different gusts are pooled.
+- With fewer than 10 damaged trees a warning says to read counts, not p-values.
+
+**Fall direction** (fallen trees with a linked log): the angle between the
+observed direction and each model's most likely direction, for both frozen
+copies and for "downhill only", "lean only", "wind only" and a uniform guess
+(90° on average); the log-likelihood of the observed directions under the
+36-direction forecast vs a uniform one (sum of ln(chance given to the true
+direction); higher is better); and a rose diagram with the storm wind marked.
+
+**Landing zone and exposure:** whether each log ended within the tree's reach
+and inside the most likely landing strip; the frozen fall exposure under new
+logs vs at random forest points (Mann-Whitney U); and whether a new log landed
+on a detected trail, road, stream or building that the tree had been flagged for.
+
+**Field confirmation** (blind): every fallen or snapped tree (up to 30) mixed
+with as many random "no change" trees, 4-digit codes, and a printable booklet
+of *before* photo crops. The sheet has only: status, storm_damage (none /
+branches / top broken / fallen / uprooted), fall_azimuth_deg, notes. Uploading
+it reports the change detection's precision and recall per class.
+
+Results: `results/storms/<storm>/storm_results.json`, `storm_trees.csv`,
+`new_logs.csv`, `fall_directions.csv`, and all storms pooled in
+`results/storms/pooled_results.json`.
+
+### Design criteria
+
+`config/design_criteria.yaml` (created on first use; edit the targets there):
+
+| Criterion | Target |
+|---|---|
+| `storm_auc_severe` | ≥ 0.70 (pooled AUC of the frozen score for fallen or snapped trees) |
+| `storm_beats_baseline` | true (full score AUC > "tallest first" AUC) |
+| `fall_direction_mae_deg` | ≤ 45 (median direction error) |
+| `calm_false_change_rate` | ≤ 0.01 |
+
+Each shows **no data yet** until a storm (or calm pair) has been analyzed.
+**Export results for board** writes `results/summary.md` and 300 dpi PNGs of
+the change map, AUC chart and rose diagram to `results/figures/`.
+
+### Flight checklist
+
+- Same flight plan, altitude, overlap, camera angle and exposure settings for
+  every survey of a site; save the plan file in the survey folder.
+- Fly before a storm as close to it as is safely possible (ideally 1-3 days),
+  and after as soon as winds are within the drone's limits and it is safe.
+  **Never fly in or near storm conditions.**
+- Similar time of day (shadows change the photo and the surface model).
+- At least one calm-pair repeat flight per season as the null test.
+- Note the leaf condition (on / turning / off) in the flight notes every flight.
+- Check that the after survey fully covers the before area; damage at the map
+  edge is "uncertain".
+
+**Why the same flight plan matters (measured):** the two existing surveys
+`forest` and `forest-large` were flown with different plans. Lined up by this
+code they differ by a 2.8 m shift, a 1.5% scale difference, about 1° of tilt
+and several meters of bend, and even after correction 2 m of noise is left on
+open ground, which would falsely flag about 11% of trees. Open ground agrees to
+0.18 m at small scale, so the surveys themselves are fine; they just weren't
+flown as a matched pair.
+
+### What Phase 7 added from the Phase 6 plan
+
+Phase 6 (baselines, sensitivity, blind field check, check plots, DTM fusion,
+season setting) has not been built. The storm check needed a few of its
+pieces, which now exist: `terrain/validation.py` (baselines, AUC, bootstrap,
+Fisher, logistic regression, design criteria), the baseline rank columns in the
+tree table, `survey.json` flight notes, `config/design_criteria.yaml` and the
+Design criteria part (storm criteria only).
+
+**Tests** (`tests/test_storm.py`, 23 tests): a surface shifted 1.3 m east,
+0.4 m north, 2.1 m up and tilted 0.3° is recovered to 0.1 m and 3 cm; a shift
+that grows across the map is fitted and a bad block is dropped; a removed tree
+with a log pointing 120° is "fallen" with direction 120° (not 300°); a tree cut
+by 40% is "snapped top"; a crown missing one side is "crown damage"; a calm
+pair with 0.1 m noise gives no false changes; lowering every crown 30% trips
+the leaf-drop guard; frozen predictions survive a weight change and an edited
+file is detected; damaged = top-scoring trees gives AUC 1.0 and random damage
+about 0.5; perfect directions give error 0 and beat the uniform likelihood;
+350° and 10° average to 0°; and with no storms every criterion says "no data yet".
 
 ## Input data
 
@@ -190,7 +375,9 @@ timber_ui/            the user interface
   style.py            TIMBER's look (with .streamlit/config.toml)
   paths.py            where surveys and saved results are
 terrain/              all the math (beginner-readable, with tests)
-  survey.py           prepare a survey and save/reuse it on disk
+  survey.py           prepare a survey and save/reuse it on disk; flight notes (survey.json)
+  storm.py            storm check: freeze, align, detect change, score the predictions
+  validation.py       baselines, AUC, bootstrap, Fisher, logistic regression, design criteria
   io.py slope.py hydrology.py vegetation.py accuracy.py treefall.py
   apps/               trees.py (tree fall hazard), mudslide.py (slope stability), base.py
 tests/                pytest tests using synthetic (made-up) elevation models
@@ -198,6 +385,8 @@ assets/               TIMBER icon
 TIMBER.spec build_exe.ps1 requirements-build.txt    build TIMBER.exe
 installer/ build_installer.ps1                      build the installer (Inno Setup)
 data/                 your WebODM surveys (not committed to git)
+config/               storms.yaml and design_criteria.yaml (made by the app)
+results/              frozen predictions and storm results (made by the app)
 ```
 
 The sections below describe each analysis in detail. Page names from the

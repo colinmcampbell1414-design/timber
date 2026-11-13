@@ -26,7 +26,7 @@ binaries = []
 hiddenimports = collect_submodules("terrain") + collect_submodules("timber_ui") + [
     "streamlit.web.cli", "streamlit.runtime.scriptrunner.magic_funcs",
     "matplotlib.backends.backend_agg", "scipy.stats", "scipy.spatial", "scipy.ndimage",
-    "PIL.ImageDraw", "webview",
+    "PIL.ImageDraw", "webview", "yaml",
 ]
 for package in ["streamlit", "streamlit_image_coordinates", "rasterio", "skimage", "pyproj", "altair", "pyarrow",
                 "plotly"]:

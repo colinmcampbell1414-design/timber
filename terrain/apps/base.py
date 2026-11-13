@@ -247,6 +247,9 @@ class Result:
     # Optional tabs. If given, the page shows the metrics, then one tab per section
     # (each with its own map, tables and downloads) instead of the single map/table.
     sections: list = field(default_factory=list)
+    # The app's full working results (tables and grids), for pages that build on them
+    # (e.g. the storm check freezes the tree table).
+    raw: dict | None = None
 
     @property
     def legend(self):

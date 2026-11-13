@@ -15,6 +15,7 @@ from timber_ui.accuracy_page import accuracy_page
 from timber_ui.analysis_page import analysis_page
 from timber_ui.ground import ground_page
 from timber_ui.home import home_page
+from timber_ui.storm_panel import design_criteria, storm_check
 
 st.set_page_config(page_title="TIMBER", page_icon="🌲", layout="wide", initial_sidebar_state="expanded")
 style.apply()
@@ -29,7 +30,8 @@ def page_home():
 
 def page_trees():
     analysis_page(trees, survey, "Tree hazard",
-                  "Which trees could fall, which way, and what they could hit.")
+                  "Which trees could fall, which way, and what they could hit.",
+                  extra_parts={"Storm check": storm_check, "Design criteria": design_criteria})
 
 
 def page_slope():

@@ -92,4 +92,27 @@ def sidebar() -> survey_mod.Survey | None:
                        (f" · {s.repaired * 100:.1f}% pit-repaired" if repair and s.repaired else ""))
     s.key = version
     s.folder = folder
+    # How this survey was prepared (the storm check prepares the same grid again later).
+    s.settings = {"cell_size": cell_cm / 100, "pit_depth": pit_depth if repair else None, "detrend": detrend}
+    flight_notes(folder)
     return s
+
+
+def flight_notes(folder):
+    """Sidebar box for the flight notes kept in the survey's folder (survey.json)."""
+    info = survey_mod.read_info(folder)
+    seasons = survey_mod.SEASONS
+    with st.sidebar.expander("Flight notes"):
+        with st.form(f"notes_{folder.name}", border=False):
+            date = st.text_input("Flight date (YYYY-MM-DD)", info["date"])
+            time_ = st.text_input("Time of day (HH:MM)", info["time"])
+            season = st.selectbox("Leaves", seasons, index=seasons.index(info["season"]) if info["season"] in seasons else 0,
+                                  help="Leaf condition matters: leaf drop between two flights looks like crown damage.")
+            altitude = st.number_input("Flight altitude (m)", 0.0, 500.0, float(info["flight_altitude_m"] or 0.0), 5.0)
+            overlap = st.number_input("Photo overlap (%)", 0.0, 100.0, float(info["overlap_percent"] or 0.0), 5.0)
+            notes = st.text_area("Notes", info["notes"], height=80)
+            if st.form_submit_button("Save flight notes"):
+                survey_mod.write_info(folder, {"date": date.strip(), "time": time_.strip(), "season": season,
+                                               "flight_altitude_m": altitude or None, "overlap_percent": overlap or None,
+                                               "notes": notes})
+                st.success("Saved to survey.json.")

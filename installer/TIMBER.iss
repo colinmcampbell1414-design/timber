@@ -13,7 +13,7 @@
 ; timber.py user_folders). The uninstaller never deletes surveys.
 
 #define AppName "TIMBER"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.0"
 #define AppFullName "TIMBER - Tree Instability Mapping By Elevation & Reflectance"
 
 [Setup]

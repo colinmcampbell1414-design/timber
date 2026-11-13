@@ -39,7 +39,9 @@ def run_analysis(app_name: str, survey_key: str, run_key: str, _app, _layers, _p
     return result, time.time() - start
 
 
-def analysis_page(app, survey, title, subtitle):
+def analysis_page(app, survey, title, subtitle, extra_parts=None):
+    """extra_parts: {"title": function(survey, layers, settings, result)} adds more parts
+    after the app's own ones (the storm check and the design criteria use this)."""
     st.title(title)
     st.caption(subtitle)
     if survey is None:
@@ -93,10 +95,13 @@ def analysis_page(app, survey, title, subtitle):
         if result.metrics:
             show_metrics(result.metrics)
         # One part at a time (tabs would draw every part's map on each click, which is slow).
-        titles = [s.title for s in result.sections]
+        titles = [s.title for s in result.sections] + list(extra_parts or {})
         choice = st.segmented_control("Show", titles, default=titles[0], key=f"part_{slug}",
                                       label_visibility="collapsed") or titles[0]
-        show_section(slug, result.sections[titles.index(choice)], survey, view)
+        if extra_parts and choice in extra_parts:
+            extra_parts[choice](survey, layers, p, result)
+        else:
+            show_section(slug, result.sections[titles.index(choice)], survey, view)
     else:
         sec = app_base.Section("Result", overlays=result.overlays, annotations=result.annotations,
                                table=result.table, table_title="Flagged areas")

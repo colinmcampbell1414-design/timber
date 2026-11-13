@@ -42,6 +42,35 @@ class Survey:
     info: dict = field(default_factory=dict)
 
 
+# Notes about one flight, kept in survey.json inside the survey's folder.
+SEASONS = ["summer leaf-on", "autumn color", "leaf-off"]
+INFO_TEMPLATE = {"date": "", "time": "", "season": SEASONS[0], "flight_altitude_m": None, "overlap_percent": None,
+                 "notes": ""}
+
+
+def read_info(folder) -> dict:
+    """The flight notes in <survey folder>/survey.json (the blank template if there is none).
+
+    The date is guessed from a folder name like forest_2026-11-01 when it isn't filled in.
+    """
+    path = Path(folder) / "survey.json"
+    info = dict(INFO_TEMPLATE)
+    if path.exists():
+        try:
+            info.update(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    tail = Path(folder).name[-10:]
+    if not info["date"] and len(tail) == 10 and tail[4] == "-" and tail[7] == "-" and tail.replace("-", "").isdigit():
+        info["date"] = tail
+    return info
+
+
+def write_info(folder, info: dict):
+    path = Path(folder) / "survey.json"
+    path.write_text(json.dumps({**INFO_TEMPLATE, **info}, indent=2), encoding="utf-8")
+
+
 def find_files(folder: Path) -> dict:
     """The survey's DTM, DSM and orthophoto, found by name (WebODM names them ...-dtm.tif etc.)."""
     tifs = sorted(folder.glob("*.tif*"))

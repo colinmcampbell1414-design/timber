@@ -30,6 +30,29 @@ student must be able to explain the code to judges.
   and files may only be written to the data/cache folders from timber_ui/paths.py
   (an installed copy can't write to its own Program Files folder).
 
+## Storm check (Phase 7)
+The field check asks whether high-hazard trees LOOK defective; the storm check
+asks whether they actually FAIL. The same forest is flown before and after real
+wind storms. Scores are frozen before the storm, so this is a true prediction,
+not a fit after the fact. It is the strongest evidence in the project.
+- Math in `terrain/storm.py` (freeze, align, change detection, new logs, null
+  test, prediction/direction/landing metrics, field confirmation) and
+  `terrain/validation.py` (baselines, AUC, bootstrap, Fisher, logistic, design
+  criteria). Screens in `timber_ui/storm_panel.py` ("Storm check" and "Design
+  criteria" parts of the Tree hazard page).
+- **Never recompute scores for a storm analysis.** Always read
+  `results/storms/<storm>/predictions_frozen.csv` through `storm.load_frozen`,
+  which refuses files whose SHA-256 no longer matches `freeze_log.jsonl`.
+- Keep the two frozen copies labeled: "prevailing-wind prediction" (the real
+  forecast) and "actual-wind prediction" (direction test only).
+- "Uncertain" trees are excluded from every score. With fewer than 10 damaged
+  trees, show counts and a small-sample warning rather than leaning on p-values.
+- Files: `config/storms.yaml`, `config/design_criteria.yaml`, `data/<site>_YYYY-MM-DD/survey.json`,
+  `results/storms/<storm>/`, `results/storms/pooled_results.json`, `results/summary.md`.
+  config/ and results/ live next to the data folder (`timber_ui/paths.py`).
+- Phase 6 (sensitivity, blind field check of defects, check plots, DTM fusion,
+  season setting) is NOT built yet; only the pieces Phase 7 needed exist.
+
 ## Tech stack
 - Python 3.11+
 - Streamlit for the UI. Normally started through `timber.py`, which shows it in
@@ -74,6 +97,8 @@ timber_ui/             # UI only: home, analysis_page (trees + slope), ground, a
 .streamlit/config.toml # TIMBER's theme
 terrain/
   survey.py            # prepare a survey (DTM + DSM + photo + flow on one grid) and cache it on disk
+  storm.py             # storm check math (see "Storm check" above)
+  validation.py        # baselines, AUC, bootstrap, Fisher, logistic regression, design criteria
   io.py                # load rasters, mask nodata, resample, read pixel size
   slope.py             # slope (degrees), aspect, curvature, hillshade
   hydrology.py         # fill depressions, flow direction, flow accumulation,

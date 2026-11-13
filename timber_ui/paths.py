@@ -20,6 +20,12 @@ PROJECT = Path(__file__).resolve().parent.parent
 DATA_ROOT = Path(os.environ.get("TIMBER_DATA_DIR") or PROJECT / "data")
 CACHE_DIR = Path(os.environ.get("TIMBER_CACHE_DIR") or PROJECT / ".timber_cache")
 ASSETS = PROJECT / "assets"
+# Settings files (storms.yaml, design_criteria.yaml) and results are kept next to the
+# data folder, so they are in a place TIMBER may write to however it was started:
+# the project folder, the portable folder, or Documents/TIMBER for an installed copy.
+WORK_DIR = DATA_ROOT.parent
+CONFIG_DIR = WORK_DIR / "config"
+RESULTS_DIR = WORK_DIR / "results"
 
 
 def survey_folders() -> list[Path]:

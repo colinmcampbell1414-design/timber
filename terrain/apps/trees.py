@@ -9,7 +9,7 @@ import pandas as pd
 from affine import Affine
 from scipy import ndimage
 
-from terrain import io, treefall, vegetation
+from terrain import io, treefall, validation, vegetation
 from terrain.apps.base import (LOW_MOD_HIGH, M_TO_FT, Overlay, Result, Section, ShapeSpec, distance_to_shapes,
                                outline_annotations, shape_labels, shape_list, shapes_mask)
 
@@ -95,6 +95,9 @@ def params(st, info=None) -> dict:
         p["snag_ratio"] = c3.slider("'Possibly dead': height / crown width above", 1.0, 8.0, 3.0, 0.1)
 
     with weights:
+        p["baseline_seed"] = st.slider("Seed for the random baseline ranking", 0, 999, 42, 1,
+                                       help="The 'random order' baseline used when checking the hazard score "
+                                            "against simple rules. Same seed = same order.")
         st.caption("How much each factor counts. They are rescaled to add up to 1.")
         cols = st.columns(4)
         p["weights"] = {}
@@ -246,6 +249,8 @@ def run(layers, p) -> Result:
     trees = res["trees"]
     if len(trees) == 0:
         return Result(warnings=warnings + ["No trees found. Try a lower minimum height or less smoothing."])
+    # Simple rankings to compare the hazard score with (tallest first, random order...).
+    trees = res["trees"] = validation.add_baselines(trees, p.get("baseline_seed", 42))
 
     trees["class_num"] = trees["class"].map({"low": 0, "moderate": 1, "high": 2})
     table = _tree_table(trees, list(res["masks"]))
@@ -268,7 +273,7 @@ def run(layers, p) -> Result:
         _section_field(layers, trees),
     ]
     overlay = Overlay("Hazard class (crowns)", _crown_grid(res["crowns"], trees, "class_num"), classes=LOW_MOD_HIGH)
-    return Result(overlays=[overlay], metrics=metrics, table=table, warnings=warnings, sections=sections)
+    return Result(overlays=[overlay], metrics=metrics, table=table, warnings=warnings, sections=sections, raw=res)
 
 
 def _tree_table(trees, feature_names):
