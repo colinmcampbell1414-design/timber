@@ -67,6 +67,7 @@ def read_info(folder) -> dict:
 
 
 def write_info(folder, info: dict):
+    """Save the flight notes to <survey folder>/survey.json."""
     path = Path(folder) / "survey.json"
     path.write_text(json.dumps({**INFO_TEMPLATE, **info}, indent=2), encoding="utf-8")
 
@@ -76,6 +77,7 @@ def find_files(folder: Path) -> dict:
     tifs = sorted(folder.glob("*.tif*"))
 
     def first(word):
+        """The first GeoTIFF whose name contains `word`."""
         return next((p for p in tifs if word in p.name.lower()), None)
 
     return {"dtm": first("dtm") or (tifs[0] if tifs else None), "dsm": first("dsm"), "ortho": first("ortho")}
@@ -172,6 +174,7 @@ def _save(path: Path, s: Survey):
 
 
 def _load(path: Path, name: str, files: dict) -> Survey:
+    """Read a prepared survey back from its saved .npz file (the reverse of _save)."""
     with np.load(path, allow_pickle=False) as z:
         meta = json.loads(str(z["meta"]))
         transform = Affine(*meta["transform"])

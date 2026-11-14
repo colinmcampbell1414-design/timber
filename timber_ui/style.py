@@ -36,7 +36,8 @@ button[data-baseweb="tab"] p { font-size: 0.98rem; }
 """
 
 DISCLAIMER = ("Screening tool for a student science project. Not a substitute for a professional "
-              "arborist assessment.")
+              "arborist assessment.")  # the tree pages
+DISCLAIMER_GENERAL = "Screening tool for a student science project. Not a substitute for a professional assessment."
 
 
 def apply():

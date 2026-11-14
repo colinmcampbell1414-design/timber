@@ -1,4 +1,4 @@
-; Installer for TIMBER (Inno Setup 6, free: https://jrsoftware.org/isinfo.php).
+﻿; Installer for TIMBER (Inno Setup 6, free: https://jrsoftware.org/isinfo.php).
 ; Build it with  .\build_installer.ps1  (it builds TIMBER.exe first if needed).
 ;
 ; What the installer does:
@@ -13,7 +13,7 @@
 ; timber.py user_folders). The uninstaller never deletes surveys.
 
 #define AppName "TIMBER"
-#define AppVersion "1.1.0"
+#define AppVersion "1.2.0"
 #define AppFullName "TIMBER - Tree Instability Mapping By Elevation & Reflectance"
 
 [Setup]

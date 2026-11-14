@@ -288,7 +288,8 @@ def hazard_factors(trees, crowns, grids, cell, p, open_ground=None):
     #    crowns (low VARI and low ExG). z = how unusual, in typical spreads
     #    (negative = less green than usual). 0 until z is "start" spreads below
     #    the median, 1 at "full" spreads below.
-    if grids.get("vari") is not None:
+    season = p.get("season", "summer leaf-on")
+    if grids.get("vari") is not None and season != "leaf-off":
         vari = _label_mean(lab, grids["vari"], n)
         exg = _label_mean(lab, grids["exg"], n)
         out["mean_vari"], out["mean_exg"] = vari, exg
@@ -297,9 +298,18 @@ def hazard_factors(trees, crowns, grids, cell, p, open_ground=None):
         out["f_health"] = ramp(-z, p["health_start"], p["health_full"])
         out["possibly stressed"] = _robust_z(vari) < -p["stress_k"]
         # Possible dead tree ("snag"): tall enough, very low greenness, and a small crown for its height.
-        out["possibly dead"] = (h > 5) & (z < p["snag_z"]) & (ratio > p["snag_ratio"])
+        if season == "autumn color":
+            # In autumn healthy trees turn yellow and red, so "less green than usual" proves
+            # little. Only the snag rule is used: among the darkest (least green) 5% of
+            # crowns AND a small crown for its height.
+            darkest = vari <= np.nanpercentile(vari, 5) if np.isfinite(vari).any() else np.zeros(n, dtype=bool)
+            out["possibly dead"] = (h > 5) & darkest & (ratio > p["snag_ratio"])
+        else:
+            out["possibly dead"] = (h > 5) & (z < p["snag_z"]) & (ratio > p["snag_ratio"])
     else:
-        out["f_health"] = np.nan  # unknown without a photo
+        # Unknown without a photo, and switched off for a leaf-off photo (bare crowns
+        # all look "dead"). The other weights are rescaled (see hazard_score).
+        out["f_health"] = np.nan
         out["possibly dead"] = False
 
     # g. Lean / lopsided crown (low confidence): the arrow from the tree top to
@@ -434,6 +444,7 @@ def reasons(trees, weights, max_items=3):
 
 
 def _reason_words(t, name):
+    """A few plain words for one hazard factor of one tree, e.g. 'on steep 31° slope'."""
     if name == "height":
         return f"Tall ({t['height']:.0f} m)"
     if name == "slope":
@@ -874,7 +885,7 @@ def detect_logs(chm, transform, cell, low=0.2, high=1.5, min_length=4.0, max_wid
     return logs, mapping[labels]
 
 
-def compare_logs_with_random(logs, grids, exposure_full, trees, cell, n_random=500, seed=0):
+def compare_logs_with_random(logs, grids, exposure_full, trees, cell, n_random=500, seed=42):
     """Mean slope / wetness / fall exposure / nearby tree hazard at downed logs vs random spots."""
     valid = np.isfinite(grids["chm"])
     rng = np.random.default_rng(seed)
@@ -908,7 +919,7 @@ def compare_logs_with_random(logs, grids, exposure_full, trees, cell, n_random=5
 FIELD_BLANKS = ["observed_height", "observed_lean_deg", "dead_or_damaged", "root_damage", "notes"]
 
 
-def field_check_export(trees, crs, n_top=20, seed=0):
+def field_check_export(trees, crs, n_top=20, seed=42):
     """Top N priority trees plus N random low-hazard trees, ready to check in the woods."""
     top = trees.sort_values("priority", ascending=False).head(n_top).assign(group="top priority")
     low_pool = trees[(trees["class"] == "low") & ~trees["tree"].isin(top["tree"])]

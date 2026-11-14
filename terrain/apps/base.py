@@ -27,6 +27,7 @@ from scipy import ndimage
 
 from terrain import hydrology, slope, vegetation
 from terrain.treefall import ramp  # noqa: F401 (shared: 0 until a start point, 1 at a full point)
+from terrain.treefall import _smooth as smooth_ignoring_nan
 from terrain.io import Raster
 
 M3_TO_FT3 = 35.3147  # cubic feet in one cubic meter
@@ -119,41 +120,50 @@ class Layers:
         return result
 
     def has(self, name: str) -> bool:
+        """Is this input (dtm / dsm / ortho) available?"""
         return {"dtm": self.dtm is not None, "dsm": self.dsm is not None, "ortho": self.ortho is not None}[name]
 
     @property
     def cell(self):
+        """Cell width and height in meters."""
         return self.dtm.pixel_size  # (cell width, cell height) in meters
 
     @property
     def cell_area(self):
+        """Area of one cell in square meters (width x height)."""
         px, py = self.cell
         return px * py
 
     @cached_property
     def slope_deg(self):
+        """Slope of the ground in degrees (worked out once, then remembered)."""
         return slope.slope_degrees(self.dtm.data, *self.cell)
 
     @cached_property
     def aspect_deg(self):
+        """Compass direction each slope faces, i.e. downhill (worked out once)."""
         return slope.aspect_degrees(self.dtm.data, *self.cell)
 
     @cached_property
     def flow(self):
+        """Water flow results (fill, flow direction, accumulation); given ones are reused."""
         if self.flow_result is not None:
             return self.flow_result
         return hydrology.analyze_flow(self.dtm.data, *self.cell)
 
     @cached_property
     def twi(self):
+        """Topographic wetness index: how wet the ground tends to stay (worked out once)."""
         return hydrology.topographic_wetness_index(self.flow["acc_area_m2"], self.slope_deg, self.cell[0])
 
     @cached_property
     def exg(self):
+        """Excess Green index from the photo (None without a photo)."""
         return vegetation.exg(self.ortho) if self.ortho is not None else None
 
     @cached_property
     def vari(self):
+        """VARI greenness index from the photo (None without a photo)."""
         return vegetation.vari(self.ortho) if self.ortho is not None else None
 
     @cached_property
@@ -353,15 +363,7 @@ def nan_smooth(z: np.ndarray, radius_m: float, cell: float) -> np.ndarray:
     count more). Dividing by the smoothed "valid" mask means missing cells
     don't pull the average toward 0.
     """
-    sigma = max(radius_m / cell, 0.01)
-    valid = np.isfinite(z)
-    filled = np.where(valid, z, 0.0)
-    num = ndimage.gaussian_filter(filled, sigma, mode="nearest")
-    den = ndimage.gaussian_filter(valid.astype(float), sigma, mode="nearest")
-    with np.errstate(invalid="ignore", divide="ignore"):
-        out = num / den
-    out[~valid] = np.nan
-    return out
+    return smooth_ignoring_nan(z, max(radius_m, 0.01 * cell), cell)  # the one shared implementation
 
 
 def classify(score: np.ndarray, moderate: float, high: float) -> np.ndarray:

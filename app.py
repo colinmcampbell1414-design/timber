@@ -15,7 +15,9 @@ from timber_ui.accuracy_page import accuracy_page
 from timber_ui.analysis_page import analysis_page
 from timber_ui.ground import ground_page
 from timber_ui.home import home_page
-from timber_ui.storm_panel import design_criteria, storm_check
+from timber_ui.storm_panel import storm_check
+from timber_ui.style import DISCLAIMER_GENERAL
+from timber_ui.validation_panel import design_criteria, field_check, log_validation, sensitivity_box
 
 st.set_page_config(page_title="TIMBER", page_icon="🌲", layout="wide", initial_sidebar_state="expanded")
 style.apply()
@@ -31,12 +33,15 @@ def page_home():
 def page_trees():
     analysis_page(trees, survey, "Tree hazard",
                   "Which trees could fall, which way, and what they could hit.",
-                  extra_parts={"Storm check": storm_check, "Design criteria": design_criteria})
+                  extra_parts={"Field check": field_check, "Design criteria": design_criteria,
+                               "Storm check": storm_check},
+                  part_extras={"Trees & hazard": sensitivity_box, "Downed logs": log_validation})
 
 
 def page_slope():
     analysis_page(mudslide, survey, "Slope stability",
-                  "Ground that is steep, wet and collects water, where soil could slump or slide.")
+                  "Ground that is steep, wet and collects water, where soil could slump or slide.",
+                  banner=DISCLAIMER_GENERAL)
 
 
 def page_ground():

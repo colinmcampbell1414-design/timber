@@ -91,6 +91,7 @@ def load_storms(config_dir) -> list:
 
 
 def save_storms(config_dir, storms: list):
+    """Write the storm list to config/storms.yaml."""
     import yaml
 
     path = Path(config_dir) / "storms.yaml"
@@ -285,6 +286,7 @@ def freeze_predictions(out_dir, trees: pd.DataFrame, probs: np.ndarray, settings
 
 
 def freeze_log(out_dir) -> list:
+    """Every freeze so far (one entry per line of freeze_log.jsonl), oldest first."""
     path = Path(out_dir) / LOG_FILE
     if not path.exists():
         return []
@@ -331,6 +333,7 @@ def load_frozen(out_dir, label: str = PREVAILING):
 
 
 def load_frozen_grids(out_dir) -> dict:
+    """The frozen crown outlines, exposure map and feature masks."""
     with np.load(Path(out_dir) / GRIDS_FILE, allow_pickle=False) as z:
         return {k: z[k] for k in z.files}
 
@@ -526,13 +529,9 @@ def fit_plane(diff: np.ndarray, mask: np.ndarray, cell: float):
         spread = 1.4826 * np.median(np.abs(resid[ok] - np.median(resid[ok])))
         ok = ok & (np.abs(resid) <= max(3 * spread, 0.02))
     plane = coef[0] + coef[1] * east + coef[2] * north
-    resid = (diff - plane)[mask & np.isfinite(diff)]
-    # RMS = root of the mean squared leftover. The middle 98% is used so a few changed spots don't count.
-    lo, hi = np.percentile(resid, [1, 99])
-    core = resid[(resid >= lo) & (resid <= hi)]
     report = {"cells": int(ok.sum()), "offset_m": float(coef[0]),
               "tilt_deg": float(np.degrees(np.arctan(np.hypot(coef[1], coef[2])))),
-              "rms_m": float(np.sqrt(np.mean(core ** 2)))}
+              "rms_m": _stable_rms(diff - plane, mask)}
     return plane, report
 
 
@@ -918,7 +917,7 @@ def score_columns(table: pd.DataFrame) -> dict:
     return cols
 
 
-def prediction_metrics(table: pd.DataFrame, peak_gust=None, n_boot: int = 2000, seed: int = 0) -> dict:
+def prediction_metrics(table: pd.DataFrame, peak_gust=None, n_boot: int = 2000, seed: int = 42) -> dict:
     """Hazard score vs damage, using only frozen scores. Uncertain trees are left out."""
     t = table[table["judged"]].reset_index(drop=True)
     out = {"trees": int(len(t)), "outcomes": {}}
@@ -1006,7 +1005,7 @@ def direction_metrics(table: pd.DataFrame, probs_by_label: dict, wind_from_deg=N
 
 
 def landing_metrics(table: pd.DataFrame, new_logs: pd.DataFrame, grids: dict, chm_before: np.ndarray, transform,
-                    cell: float, settings: dict, seed: int = 0) -> dict:
+                    cell: float, settings: dict, seed: int = 42) -> dict:
     """Landing strips, the exposure map and features, against the new logs.
 
     - For each fallen tree with a log: did the log's far end stay within the
@@ -1110,11 +1109,42 @@ def save_storm_results(out_dir, storm: dict, comparison: dict, table: pd.DataFra
         "landing": {"strip": _plain(landing["strip"]), "exposure": _plain(landing["exposure"]),
                     "features": _records(landing["features"])},
     }
+    results["sentences"] = storm_sentences(results)
     (out_dir / "storm_results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     return results
 
 
-def pool_results(storms_dir, storms: list, n_boot: int = 2000, seed: int = 0) -> dict:
+def storm_sentences(r: dict) -> list:
+    """Plain sentences about one storm for results/summary.md."""
+    c, a = r["counts"], r["alignment"]
+    out = [f"Predictions frozen {r['frozen'].get('frozen_at_utc', '?')} UTC (fingerprint "
+           f"{str(r['frozen'].get('combined', ''))[:16]}...); frozen before the storm: {r['frozen'].get('frozen_before_storm')}.",
+           f"Alignment: sideways shift {a['shift_m']:.2f} m, leftover height noise on stable ground {a['dsm']['rms_m']:.2f} m.",
+           f"Of {c['compared']} trees compared: {c['fallen']} fallen, {c['snapped top']} snapped top, "
+           f"{c['crown damage']} crown damage; {r['new_logs']} new logs."]
+    if r["storm"].get("is_calm_control"):
+        rate = c["any_damage"] / c["compared"] if c["compared"] else float("nan")
+        out.append(f"Calm pair: {c['any_damage']} of {c['compared']} trees falsely flagged ({100 * rate:.2f}%).")
+        return out
+    severe = r["prediction"]["outcomes"]["severe"]
+    full = next((x for x in severe["auc"] if x["ranking"] == "full hazard score"), None)
+    if full and full["AUC"] is not None:
+        note = " (fewer than 10 damaged trees: a count, not a statistic)" if severe["small_sample"] else ""
+        out.append(f"Frozen hazard score vs severe damage: AUC {full['AUC']:.2f} (95% range {full['low 95%']:.2f} to "
+                   f"{full['high 95%']:.2f}){note}.")
+    for row in r["direction"]["table"][:2]:
+        out.append(f"Fall direction, {row['model']}: median error {row['median error (°)']:.0f}° over {row['trees']} trees.")
+    strip, exposure = r["landing"]["strip"], r["landing"]["exposure"]
+    if strip:
+        out.append(f"Landing zone: {strip['within reach (any direction)']} of {strip['trees']} logs ended within the "
+                   f"predicted reach; {strip['inside the most likely strip']} inside the most likely strip.")
+    if exposure:
+        out.append(f"Frozen fall exposure under new logs: {exposure['mean exposure under new logs']:.3f} vs "
+                   f"{exposure['mean exposure at random forest points']:.3f} at random forest points.")
+    return out
+
+
+def pool_results(storms_dir, storms: list, n_boot: int = 2000, seed: int = 42) -> dict:
     """Combine every analyzed storm into results/storms/pooled_results.json.
 
     Storms are pooled by stacking their tree tables (each tree with its FROZEN
@@ -1163,6 +1193,16 @@ def pool_results(storms_dir, storms: list, n_boot: int = 2000, seed: int = 0) ->
                 "odds": _plain(o["odds"])} for k, o in prediction["outcomes"].items()}}
     if errors:
         criteria["fall_direction_mae_deg"] = float(np.median(errors))
+    sentences = []
+    if criteria["storm_auc_severe"] is not None:
+        sentences.append(f"{len(used)} storm(s) pooled: AUC of the frozen hazard score for severe damage "
+                         f"{criteria['storm_auc_severe']:.2f}; beats 'tallest first': {criteria['storm_beats_baseline']}.")
+    if criteria["fall_direction_mae_deg"] is not None:
+        sentences.append(f"Median fall direction error {criteria['fall_direction_mae_deg']:.0f}° over {len(errors)} trees.")
+    if criteria["calm_false_change_rate"] is not None:
+        sentences.append(f"Calm pairs: {calm['changed']} of {calm['compared']} trees falsely flagged "
+                         f"({100 * criteria['calm_false_change_rate']:.2f}%).")
+    pooled["sentences"] = sentences
     storms_dir.mkdir(parents=True, exist_ok=True)
     (storms_dir / "pooled_results.json").write_text(json.dumps(_plain(pooled), indent=2), encoding="utf-8")
     return pooled
@@ -1176,7 +1216,7 @@ FIELD_DAMAGE = {"none": "no change", "branches": "crown damage", "top broken": "
                 "uprooted": "fallen"}
 
 
-def field_sheet(table: pd.DataFrame, n_max: int = 30, seed: int = 0):
+def field_sheet(table: pd.DataFrame, n_max: int = 30, seed: int = 42):
     """A blind check sheet: every fallen or snapped tree (up to 30) mixed with the
     same number of random "no change" trees, shuffled, each with a random 4-digit code.
 

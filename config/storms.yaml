@@ -1,0 +1,6 @@
+# One entry per storm (or calm pair) that was flown before and after.
+#   before_survey / after_survey: folder names inside the data folder.
+#   wind_from_deg: where the wind came FROM during the strongest winds (270 = west).
+#   is_calm_control: true for two flights with NO storm between them (the null test).
+# Wind numbers come from the nearest airport weather station (see the README).
+storms: []

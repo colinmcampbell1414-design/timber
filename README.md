@@ -8,6 +8,8 @@ find which trees in a forest could fall on trails, roads and buildings.
 heights, slope and water flow. *Reflectance* = the photo colors (VARI/ExG),
 used for the tree health check.
 
+**Engineering goal.** Design an automated system that uses only a consumer drone and free software (WebODM + this app) to find which trees in a forest pose the greatest fall risk to trails, roads and buildings, accurately enough to direct a field inspection and faster than a manual walk-through survey.
+
 > **Screening tool for a student science project. Not a substitute for a
 > professional arborist assessment.**
 
@@ -145,6 +147,134 @@ button) and saved results and its log in `%LOCALAPPDATA%\TIMBER`
 a new version, run `.\build_exe.ps1`, change `AppVersion` in
 `installer\TIMBER.iss` (never `AppId`), then run `.\build_installer.ps1`.
 
+## Validation (Phase 6)
+
+Tools that test whether the hazard score means anything. Math:
+`terrain/validation.py` and `terrain/fusion.py`. Screens:
+`timber_ui/validation_panel.py`. Every tool saves a results file in `results/`
+holding its measured design criteria and a plain sentence for the summary.
+
+**Baselines.** Next to the hazard score, every tree gets three simple
+rankings: `baseline_height` (tallest first), `baseline_height_target` (tallest
+first among trees that can reach a trail, road or building) and
+`baseline_random` (a random order with a seed, default 42). A judge will ask
+"is the 8-factor score better than something simple?"; these answer it.
+
+**Weight sensitivity** (Tree hazard → Trees & hazard → *Sensitivity*). Do the
+results depend on the weights I chose?
+- One at a time: each weight × 0.5 and × 1.5 (the rest rescaled to add up to
+  1); the Spearman rank correlation with the original scores and how many of
+  the original top 20 stay in the top 20.
+- 500 random weight sets from a Dirichlet distribution centered on the current
+  weights (concentration 20). For each tree: how often it lands in the top 20.
+  `weight_stability_top20` = the mean share of the original top 20 kept.
+- All 500 sets are scored with one matrix product (trees × factors times
+  factors × sets), which takes a fraction of a second on the forest.
+
+**Season** (sidebar → Flight notes → Leaves; saved in the survey's
+`survey.json`). Autumn color makes healthy trees look stressed, so with
+*autumn color* the health weight starts at 0.05, a banner says so, and
+"possibly dead" uses only the snag rule (among the least green 5% of crowns
+and a small crown for its height). With *leaf-off* the health factor and
+"possibly dead" are switched off and the other weights are rescaled.
+
+**Leaf-on / leaf-off fusion** (sidebar → *Ground model (DTM) source*, and
+Ground check → *DTM comparison*). Photogrammetry can't see the ground under
+leaves. A ground model from a leaf-off survey of the same place (another
+folder in `data/`) or from public lidar (a GeoTIFF in `data/outside_dtm/`) can
+replace the survey's own: it is reprojected onto the survey's grid (bilinear),
+feet are converted to meters (read from the file, or chosen by hand; a US
+survey foot is 1200/3937 m), and it is lined up vertically by fitting a plane
+on stable open ground (canopy under 0.5 m with both models, smooth, slope under
+10°). The comparison shows every ground model against a reference, split into
+open ground and under canopy, the canopy heights each produces, hillshades side
+by side, and (after a field check) the tree-height RMSE for every ground model.
+That table is the before/after result of the leaf-off flight.
+
+### Field workflow
+
+1. **Export** (Tree hazard → Field check → *Export the blind field sheet*).
+   N highest-scoring trees and N random trees from the lowest third of scores
+   (default 30 + 30), all taller than 10 m and optionally within 30 m of a
+   trail, shuffled, each with a random 4-digit code. Saved in
+   `results/field_check/`:
+   - `field_sheet.csv` (take along): code, latitude, longitude, distance and
+     bearing from the nearest trail point, and blank columns. **No score, group,
+     height, reasons or tree number**, so you can't be influenced.
+   - `field_booklet.html` (print): a 40 × 40 m photo of each tree with its crown
+     outlined, a north arrow and a 10 m scale bar.
+   - `field_key.csv` (stays home): which code is which tree.
+2. **In the woods**, for each code fill in: `status` (found / not_found /
+   inaccessible), `observed_height_m` (clinometer), and y or n for
+   `dead_or_dying_crown`, `broken_or_dead_top`, `trunk_crack_or_cavity`,
+   `root_damage_or_heaving`, `lean_over_15deg`, `hanging_dead_branches`,
+   `undercut_bank`; plus `notes`.
+3. **Check plots.** Click 3-5 plot centers (or upload plot_id, latitude,
+   longitude, radius_m), save `plot_sheet.csv` and its cards, and count the
+   trees taller than 10 m inside each circle (`field_count_over_10m`).
+4. **Import** both filled sheets on the same page. Reported and saved in
+   `results/field_check_results.json` / `.csv` and `results/detection_plots.json`:
+   - defect rate in each group, their ratio, and Fisher's exact test with its 2×2 table;
+   - AUC (the chance a defective tree outranks a sound one) for the full score,
+     each baseline and each single factor;
+   - tree height bias, MAE and RMSE with a 1:1 scatter plot, split into
+     open/edge and interior trees;
+   - the "possibly dead" flag against what was seen (2×2 table);
+   - detection rate per plot and overall (sum of app counts / sum of field
+     counts; count-based, so a missed tree and an extra tree cancel).
+5. **Downed logs** (Tree hazard → Downed logs). Logs within 5 m of trails and
+   roads are left out (trail crews cut them). Slope, wetness, edge exposure and
+   canopy height around each log are compared with 1000 random forest points
+   (Mann-Whitney U). Log directions are tested against the downhill direction
+   with **axial statistics**: the angle between log and slope is doubled (so 30°
+   and 210° count as the same axis), the mean resultant length is worked out,
+   and a Rayleigh test gives the chance of that much agreement by luck. Logs
+   you measured yourself can be uploaded (latitude, longitude, axis_azimuth_deg,
+   length_m) and get the same tests.
+6. **Timing** (Design criteria → *Survey speed*): type in your flying,
+   processing and field hours. Speed = hectares / (your hours + computer time).
+
+### Design criteria
+
+`config/design_criteria.yaml` (created on first use; edit the targets there).
+The **Design criteria** part of the Tree hazard page shows each with its
+target, measured value, PASS / FAIL / NO DATA YET and the file it came from.
+
+| Criterion | Target | Measured from |
+|---|---|---|
+| `detection_rate` | ≥ 0.80 | check plots, trees over 10 m |
+| `height_rmse_m` | ≤ 1.5 | field sheet heights |
+| `defect_rate_ratio` | ≥ 2.0 | field check: defect rate high / low |
+| `fisher_p` | ≤ 0.05 | field check |
+| `beats_baseline` | true | field check: full score AUC above every baseline |
+| `log_factor_test_p` | ≤ 0.05 | downed-log factor test (smallest p × number of factors) |
+| `hectares_per_hour` | ≥ 10 | your hours + compute time |
+| `storm_auc_severe` | ≥ 0.70 | storm check, pooled |
+| `storm_beats_baseline` | true | storm AUC: full score above "tallest first" |
+| `fall_direction_mae_deg` | ≤ 45 | storm check, actual-wind model |
+| `calm_false_change_rate` | ≤ 0.01 | calm pairs |
+| `weight_stability_top20` | ≥ 0.75 | sensitivity |
+
+Also reported, as background only: the best-case open-ground vertical error
+from the Accuracy checker (yard survey).
+
+**Export results for board** writes `results/summary.md` (the goal, the
+criteria table and a plain-sentence result from every tool) and every chart as
+a 300 dpi PNG in `results/figures/`.
+
+### Audit
+
+```powershell
+.\.venv\Scripts\python scripts\audit.py
+```
+
+re-checks the whole project: every module imports, the required files exist,
+the yaml has the 12 criteria, the seven parts of the tree page exist, pytest
+passes, the full chain runs on a small made-up forest and every step writes its
+file, and (if `data/forest` exists) the tree analysis and the sensitivity run
+are fast enough. It prints one table and `AUDIT PASSED` or the failing IDs.
+The requirement list with evidence is `docs/requirements_checklist.md`.
+
 ## Storm check (Phase 7)
 
 **Why it matters.** A field check asks whether high-hazard trees *look*
@@ -274,20 +404,9 @@ Results: `results/storms/<storm>/storm_results.json`, `storm_trees.csv`,
 `new_logs.csv`, `fall_directions.csv`, and all storms pooled in
 `results/storms/pooled_results.json`.
 
-### Design criteria
-
-`config/design_criteria.yaml` (created on first use; edit the targets there):
-
-| Criterion | Target |
-|---|---|
-| `storm_auc_severe` | ≥ 0.70 (pooled AUC of the frozen score for fallen or snapped trees) |
-| `storm_beats_baseline` | true (full score AUC > "tallest first" AUC) |
-| `fall_direction_mae_deg` | ≤ 45 (median direction error) |
-| `calm_false_change_rate` | ≤ 0.01 |
-
-Each shows **no data yet** until a storm (or calm pair) has been analyzed.
-**Export results for board** writes `results/summary.md` and 300 dpi PNGs of
-the change map, AUC chart and rose diagram to `results/figures/`.
+The four storm criteria (`storm_auc_severe`, `storm_beats_baseline`,
+`fall_direction_mae_deg`, `calm_false_change_rate`) are in the Design criteria
+table above and show NO DATA YET until a storm or calm pair has been analyzed.
 
 ### Flight checklist
 
@@ -309,15 +428,6 @@ and several meters of bend, and even after correction 2 m of noise is left on
 open ground, which would falsely flag about 11% of trees. Open ground agrees to
 0.18 m at small scale, so the surveys themselves are fine; they just weren't
 flown as a matched pair.
-
-### What Phase 7 added from the Phase 6 plan
-
-Phase 6 (baselines, sensitivity, blind field check, check plots, DTM fusion,
-season setting) has not been built. The storm check needed a few of its
-pieces, which now exist: `terrain/validation.py` (baselines, AUC, bootstrap,
-Fisher, logistic regression, design criteria), the baseline rank columns in the
-tree table, `survey.json` flight notes, `config/design_criteria.yaml` and the
-Design criteria part (storm criteria only).
 
 **Tests** (`tests/test_storm.py`, 23 tests): a surface shifted 1.3 m east,
 0.4 m north, 2.1 m up and tilted 0.3° is recovered to 0.1 m and 3 cm; a shift
@@ -377,6 +487,8 @@ timber_ui/            the user interface
 terrain/              all the math (beginner-readable, with tests)
   survey.py           prepare a survey and save/reuse it on disk; flight notes (survey.json)
   storm.py            storm check: freeze, align, detect change, score the predictions
+  fusion.py           another ground model (leaf-off survey, lidar): reproject, feet to m, align, compare
+  selfcheck.py        end-to-end run on a made-up forest
   validation.py       baselines, AUC, bootstrap, Fisher, logistic regression, design criteria
   io.py slope.py hydrology.py vegetation.py accuracy.py treefall.py
   apps/               trees.py (tree fall hazard), mudslide.py (slope stability), base.py
@@ -385,6 +497,8 @@ assets/               TIMBER icon
 TIMBER.spec build_exe.ps1 requirements-build.txt    build TIMBER.exe
 installer/ build_installer.ps1                      build the installer (Inno Setup)
 data/                 your WebODM surveys (not committed to git)
+scripts/audit.py      re-check the whole project (prints AUDIT PASSED or the failing IDs)
+docs/                 the original specs (docs/prompts/) and docs/requirements_checklist.md
 config/               storms.yaml and design_criteria.yaml (made by the app)
 results/              frozen predictions and storm results (made by the app)
 ```

@@ -10,7 +10,8 @@ import numpy as np
 import streamlit as st
 from scipy.stats import linregress
 
-from terrain import accuracy, io, slope
+from terrain import accuracy, io, slope, validation
+from timber_ui.paths import WORK_DIR
 from timber_ui.maps import local_extent, new_map_axes, show_fig
 from timber_ui.survey_panel import load_native
 
@@ -308,6 +309,12 @@ def accuracy_page(survey):
     )
 
     full_stats = {name: accuracy.error_stats(table[f"{name}_error"]) for name in models}
+    if full_stats["DTM"]["n"]:
+        # Background number for the project summary (not a pass/fail criterion).
+        dtm_stats = full_stats["DTM"]
+        validation.save_result(WORK_DIR, "results/accuracy.json", {}, [
+            f"Best-case open-ground vertical error: RMSE {dtm_stats['rmse'] * 100:.1f} cm over {dtm_stats['n']} hand-measured "
+            f"check points ({survey.name} survey, after removing the mean offset)."], {"dtm": dtm_stats})
     st.dataframe(format_stats(accuracy.stats_table(full_stats)), hide_index=True, width="stretch")
     with st.expander("What do these statistics mean?"):
         st.markdown(

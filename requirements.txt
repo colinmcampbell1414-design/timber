@@ -22,3 +22,4 @@ plotly>=5.20                         # zoomable maps where you can click a tree
 
 # Storm check (Phase 7)
 pyyaml>=6.0                          # config/storms.yaml and config/design_criteria.yaml
+affine>=2.4                          # grid transforms (installed with rasterio; imported directly)

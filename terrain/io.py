@@ -302,19 +302,22 @@ def load_image(path, bounds=None, max_size=1600):
         return rgba, window_bounds(window, src.transform), src.crs
 
 
-def resample_to_grid(raster: Raster, target: Raster) -> Raster:
+def resample_to_grid(raster: Raster, target: Raster, resampling: str = "average") -> Raster:
     """Put `raster` onto exactly the same grid (cells) as `target`.
 
     Needed so two rasters (e.g. DSM and DTM, or two DTMs from different days)
-    can be subtracted cell by cell. Each target cell gets the average of the
-    source cells that fall inside it.
+    can be subtracted cell by cell. The rasters may be in different coordinate
+    systems. "average": each target cell gets the average of the source cells
+    inside it (best when the source is finer). "bilinear": a blend of the 4
+    nearest source cells (best when the source is coarser, e.g. 1 m lidar).
     """
     out = np.full(target.shape, np.nan, dtype="float64")
     reproject(
         source=raster.data, destination=out,
         src_transform=raster.transform, src_crs=raster.crs,
         dst_transform=target.transform, dst_crs=target.crs,
-        src_nodata=np.nan, dst_nodata=np.nan, resampling=Resampling.average,
+        src_nodata=np.nan, dst_nodata=np.nan,
+        resampling=Resampling.bilinear if resampling == "bilinear" else Resampling.average,
     )
     return Raster(data=out, transform=target.transform, crs=target.crs)
 

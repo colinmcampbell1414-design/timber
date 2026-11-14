@@ -1,0 +1,28 @@
+{
+  "criteria": {},
+  "sentences": [
+    "survey: forest: under canopy +5.41 m from the reference on average (RMS 8.50 m), open ground RMS 6.68 m; median canopy height 9.1 m.",
+    "survey: forest-large (reference): under canopy +0.00 m from the reference on average (RMS 0.00 m), open ground RMS 0.00 m; median canopy height 9.6 m."
+  ],
+  "table": [
+    {
+      "DTM source": "survey: forest",
+      "open ground: mean difference (m)": -4.09188086512567,
+      "open ground: RMS (m)": 6.679922613431616,
+      "under canopy: mean difference (m)": 5.41200562423905,
+      "under canopy: RMS (m)": 8.495444519273738,
+      "median canopy height (m)": 9.079791269821232,
+      "tree-high area (%)": 21.85030543495526
+    },
+    {
+      "DTM source": "survey: forest-large (reference)",
+      "open ground: mean difference (m)": 0.0,
+      "open ground: RMS (m)": 0.0,
+      "under canopy: mean difference (m)": 0.0,
+      "under canopy: RMS (m)": 0.0,
+      "median canopy height (m)": 9.630715485150787,
+      "tree-high area (%)": 31.660810842113623
+    }
+  ],
+  "reference": "survey: forest-large"
+}

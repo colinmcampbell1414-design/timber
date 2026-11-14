@@ -32,4 +32,4 @@ def survey_folders() -> list[Path]:
     """Every subfolder of the data folder that holds GeoTIFF files, A to Z."""
     if not DATA_ROOT.exists():
         return []
-    return sorted(p for p in DATA_ROOT.iterdir() if p.is_dir() and any(p.glob("*.tif*")))
+    return sorted(p for p in DATA_ROOT.iterdir() if p.is_dir() and p.name != "outside_dtm" and any(p.glob("*.tif*")))

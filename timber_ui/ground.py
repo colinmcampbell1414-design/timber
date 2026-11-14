@@ -9,7 +9,9 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from terrain import hydrology, io, slope
+from terrain import fusion, hydrology, io, slope, validation
+from timber_ui.paths import RESULTS_DIR, WORK_DIR
+from timber_ui.survey_panel import dtm_sources
 from timber_ui.maps import local_extent, new_map_axes, show_fig
 from timber_ui.accuracy_page import draw_background
 
@@ -28,10 +30,90 @@ def ground_page(survey):
         st.info("Choose a survey in the sidebar first.")
         return
     # One view at a time (tabs would draw all three every time, which is slow on big maps).
-    views = {"Overview": overview_tab, "Slope": slope_tab, "Water flow": water_tab}
+    views = {"Overview": overview_tab, "Slope": slope_tab, "Water flow": water_tab, "DTM comparison": dtm_tab}
     choice = st.segmented_control("View", list(views), default="Overview", key="ground_view",
                                   label_visibility="collapsed") or "Overview"
     views[choice](survey)
+
+
+@st.cache_resource(show_spinner=False, max_entries=6)
+def _aligned_dtm(survey_key: str, path: str, mtime: float, units: str, _survey):
+    """Another ground model on this survey's grid, lined up with the survey's own DTM."""
+    other = fusion.to_grid(io.load_raster(path), _survey.own_dtm, units)
+    return fusion.align_dtm(other.data, _survey.own_dtm.data, _survey.dsm.data, _survey.own_dtm.pixel_size[0])
+
+
+def dtm_tab(survey):
+    """Compare ground models: this survey's own, other surveys', and outside files."""
+    st.write("Photogrammetry can't see the ground under leaves, so a leaf-on ground model rides up into the canopy "
+             "and trees look too short. This compares every available ground model for this area. To USE one for "
+             "the tree analysis, pick it under **Ground model (DTM) source** in the sidebar.")
+    if survey.dsm is None:
+        st.info("This survey has no DSM, so canopy heights can't be compared.")
+        return
+    available = dtm_sources(survey.folder)
+    if not available:
+        st.info("No other ground model yet. Add a leaf-off survey of the same area as its own folder in the data "
+                "folder, or put a lidar GeoTIFF in data/outside_dtm.")
+        return
+    units = st.selectbox("Height units of the outside files", fusion.UNIT_CHOICES, key="dtm_compare_units")
+    units = "auto" if units.startswith("auto") else units
+    own_name = f"survey: {survey.name}"
+    sources, reports = {own_name: survey.own_dtm.data}, {}
+    for label, path in available.items():
+        try:
+            with st.spinner(f"Lining up {label}..."):
+                aligned, report = _aligned_dtm(survey.key.split("_")[0], str(path), path.stat().st_mtime, units, survey)
+            if np.isfinite(aligned).mean() > 0.05:  # skip models that don't cover this area
+                sources[label], reports[label] = aligned, report
+        except Exception as err:
+            st.warning(f"{label} could not be used: {err}")
+    if len(sources) < 2:
+        st.info("None of the other ground models covers this survey's area.")
+        return
+    reference = st.selectbox("Reference ground model", list(sources), index=len(sources) - 1,
+                             help="Usually the leaf-off survey or the lidar: the one you trust most.")
+    cell = survey.own_dtm.pixel_size[0]
+    table = fusion.compare_dtms(sources, reference, survey.dsm.data, cell)
+    st.dataframe(table, hide_index=True, width="stretch", column_config={
+        c: st.column_config.NumberColumn(format="%.2f") for c in table.columns if c != "DTM source"})
+    align = pd.DataFrame([{"DTM source": k, "offset removed (m)": r["offset_before_m"], "tilt removed (°)": r["tilt_deg"],
+                           "noise left on stable ground (m)": r["rms_after_m"]} for k, r in reports.items()])
+    st.markdown("**Vertical alignment on stable open ground**")
+    st.dataframe(align, hide_index=True, width="stretch")
+
+    sentences = [f"{row['DTM source']}: under canopy {row['under canopy: mean difference (m)']:+.2f} m from the reference "
+                 f"on average (RMS {row['under canopy: RMS (m)']:.2f} m), open ground RMS {row['open ground: RMS (m)']:.2f} m; "
+                 f"median canopy height {row['median canopy height (m)']:.1f} m." for _, row in table.iterrows()]
+    field = RESULTS_DIR / "field_check_results.csv"
+    details = {"table": table, "reference": reference}
+    if field.exists():
+        checked = pd.read_csv(field)
+        checked["observed_height_m"] = pd.to_numeric(checked.get("observed_height_m"), errors="coerce")
+        checked = checked.dropna(subset=["observed_height_m"])
+        if len(checked):
+            rows = []
+            for label, dtm in sources.items():
+                app = fusion.heights_at(checked["x"], checked["y"], survey.dsm.data, dtm, survey.own_dtm.transform)
+                rows.append({"DTM source": label, **validation.height_errors(app, checked["observed_height_m"])})
+            heights = pd.DataFrame(rows)
+            st.markdown("**Tree height error against the field heights, for every ground model** (the before / after result)")
+            st.dataframe(heights, hide_index=True, width="stretch")
+            details["field_heights"] = heights
+            sentences += [f"Field heights with {r['DTM source']}: RMSE {r['rmse_m']:.2f} m (n = {r['n']})." for _, r in heights.iterrows()]
+    else:
+        st.caption("After a blind field check with heights, this page also shows the height RMSE for every ground model.")
+    validation.save_result(WORK_DIR, "results/dtm_comparison.json", {}, sentences, details)
+
+    pick = st.multiselect("Hillshades side by side", list(sources), default=list(sources)[:2], max_selections=3)
+    cols = st.columns(max(len(pick), 1))
+    extent = local_extent(survey.own_dtm)
+    for col, label in zip(cols, pick):
+        with col:
+            fig, ax = new_map_axes()
+            ax.imshow(slope.hillshade(sources[label], cell, cell, z_factor=2.0), cmap="gray", extent=extent, vmin=0, vmax=1)
+            ax.set_title(label)
+            show_fig(fig)
 
 
 def overview_tab(survey):

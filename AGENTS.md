@@ -4,19 +4,48 @@
 (elevation = the DSM/DTM; reflectance = the VARI/ExG health check). Use this name
 in the UI and docs. The project is focused on the tree fall hazard tool.
 
+## Engineering goal
+Design an automated system that uses only a consumer drone and free software (WebODM + this app) to find which trees in a forest pose the greatest fall risk to trails, roads and buildings, accurately enough to direct a field inspection and faster than a manual walk-through survey.
+
 ## What this project is
-A science fair project on drone photogrammetry for environmental and safety uses.
-Drone photos are processed in WebODM into elevation models. This app loads those
-outputs and runs screening algorithms to flag terrain hazards:
-- slope / mudslide susceptibility
-- water flow, ponding, and simple irrigation planning
-- tree fall risk (later phase)
-- an accuracy checker that compares WebODM elevations to hand-measured check points
+A science fair engineering project. Drone photos are processed in WebODM into
+elevation models (DTM, DSM) and an orthophoto. TIMBER loads them, finds every
+tree, scores how likely each is to fall and where it would land, and includes
+the tools needed to PROVE the scores mean something (Phases 6 and 7).
+The yard accuracy work (Phases 1-4) is background only: it is reported as one
+line, "best-case open-ground vertical error". Do not extend it.
 
 This is a **screening tool for a student project**, not an engineering product.
-The UI should say so. All thresholds must be adjustable (sliders), and every
-formula should have a short comment explaining it in plain language, because the
-student must be able to explain the code to judges.
+The UI says so. All thresholds are adjustable (sliders), and every formula has
+a short comment explaining it in plain language, because the student must be
+able to explain the code to judges.
+
+## Phase structure
+1-4. Load and view, Slope, Accuracy checker, Water flow (now the Ground check
+   and Accuracy checker pages; background).
+5. Tree fall hazard (the focus) and Slope stability. No other hazard apps:
+   the seven others live in ../terrain-hazard-app, which TIMBER work must not change.
+6. Validation (`terrain/validation.py`, `terrain/fusion.py`): baselines, weight
+   sensitivity, blind field check, detection check plots, downed-log tests,
+   leaf-on/leaf-off ground-model fusion, season setting, 12 design criteria.
+7. Storm check (`terrain/storm.py`): frozen predictions vs real storm damage.
+
+## Field workflow (short; details in the README)
+1. Tree hazard -> Field check: export the BLIND sheet, key and photo booklet
+   (results/field_check/). The sheet has no score, group, height or reasons.
+2. Visit the trees; fill in status, clinometer height and the y/n defect columns.
+3. Count trees over 10 m in 3-5 check plots (plot sheet).
+4. Import both sheets; results go to results/*.json and the Design criteria table.
+5. Before a storm: Storm check -> freeze predictions. After it: fly again, run.
+
+## Audit
+`python scripts/audit.py` re-checks the whole project (files, the 12 criteria,
+tab names, pytest, an end-to-end run on a made-up forest, timing on
+data/forest) and prints AUDIT PASSED or the failing requirement IDs. The
+requirement list and evidence are in docs/requirements_checklist.md; the
+original specs are in docs/prompts/. Keep both passing after every change.
+Every measured design criterion is saved by `validation.save_result` and read
+by `validation.measured_value`: never compute a criterion anywhere else.
 
 ## TIMBER UI and speed rules
 - UI code goes in `timber_ui/` (app.py only sets up pages). Math stays in `terrain/`.
@@ -50,8 +79,6 @@ not a fit after the fact. It is the strongest evidence in the project.
 - Files: `config/storms.yaml`, `config/design_criteria.yaml`, `data/<site>_YYYY-MM-DD/survey.json`,
   `results/storms/<storm>/`, `results/storms/pooled_results.json`, `results/summary.md`.
   config/ and results/ live next to the data folder (`timber_ui/paths.py`).
-- Phase 6 (sensitivity, blind field check of defects, check plots, DTM fusion,
-  season setting) is NOT built yet; only the pieces Phase 7 needed exist.
 
 ## Tech stack
 - Python 3.11+
@@ -98,6 +125,8 @@ timber_ui/             # UI only: home, analysis_page (trees + slope), ground, a
 terrain/
   survey.py            # prepare a survey (DTM + DSM + photo + flow on one grid) and cache it on disk
   storm.py             # storm check math (see "Storm check" above)
+  fusion.py            # use another DTM (leaf-off survey, lidar): reproject, feet -> m, align, compare
+  selfcheck.py         # end-to-end run on a made-up forest (tests + scripts/audit.py)
   validation.py        # baselines, AUC, bootstrap, Fisher, logistic regression, design criteria
   io.py                # load rasters, mask nodata, resample, read pixel size
   slope.py             # slope (degrees), aspect, curvature, hillshade

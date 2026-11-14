@@ -8,7 +8,6 @@ file only draws the screens and saves the charts.
 
 import base64
 import json
-from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -17,11 +16,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from terrain import io, storm, validation
+from terrain import io, storm
 from terrain import survey as survey_mod
 from terrain.apps.base import Overlay
 from timber_ui import maps
-from timber_ui.paths import CACHE_DIR, CONFIG_DIR, DATA_ROOT, RESULTS_DIR, WORK_DIR, survey_folders
+from timber_ui.charts import auc_figure, png as _png, rose_figure
+from timber_ui.paths import CACHE_DIR, CONFIG_DIR, DATA_ROOT, RESULTS_DIR, survey_folders
 from timber_ui.style import DISCLAIMER
 from timber_ui.widgets import show_table
 
@@ -251,54 +251,6 @@ def _threshold_form(slug, rms_hint=None):
 
 
 # ---------------------------------------------------------------------------
-# Charts
-# ---------------------------------------------------------------------------
-def auc_figure(auc: pd.DataFrame, title: str):
-    """AUC of every ranking with its 95% range. The dashed line (0.5) is pure guessing."""
-    auc = auc.iloc[::-1]
-    fig, ax = plt.subplots(figsize=(8, 0.42 * len(auc) + 1.4))
-    colors = ["#2e7d32" if r == "full hazard score" else "#7f8c8d" if r.startswith("baseline") else "#90a4ae"
-              for r in auc["ranking"]]
-    low = (auc["AUC"] - auc["low 95%"]).clip(lower=0).fillna(0)
-    high = (auc["high 95%"] - auc["AUC"]).clip(lower=0).fillna(0)
-    ax.barh(auc["ranking"], auc["AUC"].fillna(0), xerr=[low, high], color=colors, ecolor="black", capsize=3)
-    ax.axvline(0.5, color="black", linestyle="--", linewidth=1)
-    ax.set_xlim(0, 1)
-    ax.set_xlabel("AUC (0.5 = guessing, 1.0 = perfect); lines = 95% range")
-    ax.set_title(title)
-    fig.tight_layout()
-    return fig
-
-
-def rose_figure(observed_deg, wind_from_deg=None):
-    """Rose diagram: how many trees fell toward each direction (north up, clockwise)."""
-    fig = plt.figure(figsize=(5.5, 5.5))
-    ax = fig.add_subplot(projection="polar")
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)
-    counts, edges = np.histogram(np.asarray(observed_deg, dtype=float) % 360, bins=np.arange(0, 361, 20))
-    ax.bar(np.radians(edges[:-1] + 10), counts, width=np.radians(20), color="#c0392b", edgecolor="white", alpha=0.85)
-    if wind_from_deg is not None and np.isfinite(wind_from_deg):
-        top = max(counts.max(), 1)
-        to = np.radians((wind_from_deg + 180) % 360)
-        ax.annotate("", xy=(to, top), xytext=(np.radians(wind_from_deg), top),
-                    arrowprops=dict(arrowstyle="-|>", color="#1565c0", lw=2.5))
-        ax.set_title(f"Fall directions of storm-felled trees\n(blue arrow: wind from {wind_from_deg:.0f}°)", fontsize=11)
-    else:
-        ax.set_title("Fall directions of storm-felled trees", fontsize=11)
-    ax.set_xticks(np.radians(np.arange(0, 360, 45)))
-    ax.set_xticklabels(["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
-    return fig
-
-
-def _png(fig, dpi=300) -> bytes:
-    out = BytesIO()
-    fig.savefig(out, format="png", dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    return out.getvalue()
-
-
-# ---------------------------------------------------------------------------
 # Change map
 # ---------------------------------------------------------------------------
 def _change_layers(a, before):
@@ -350,19 +302,24 @@ def _change_layers(a, before):
 # ---------------------------------------------------------------------------
 # Field confirmation booklet
 # ---------------------------------------------------------------------------
-def _card_image(before, x, y, crowns, tree_id, size_m=40.0) -> str:
-    """A 40 m x 40 m crop of the BEFORE photo around a tree, with the crown outlined,
-    a north arrow and a 10 m scale bar (as an image for the HTML booklet)."""
+def _card_image(before, x, y, crowns, tree_id, size_m=40.0, circle_m=None) -> str:
+    """A 40 m x 40 m crop of the photo around a tree (crown outlined) or a check plot
+    (circle drawn), with a north arrow and a 10 m scale bar, for the HTML booklets."""
     t = before.dtm.transform
     cell = t.a
     r, c = int((y - t.f) / t.e), int((x - t.c) / t.a)
     half = int(size_m / 2 / cell)
-    r0, r1, c0, c1 = max(r - half, 0), min(r + half, crowns.shape[0]), max(c - half, 0), min(c + half, crowns.shape[1])
+    shape = before.dtm.shape
+    r0, r1, c0, c1 = max(r - half, 0), min(r + half, shape[0]), max(c - half, 0), min(c + half, shape[1])
     bg = maps.background_rgb(before.key, True, before)[r0:r1, c0:c1]
     fig, ax = plt.subplots(figsize=(4, 4))
     extent = (0, (c1 - c0) * cell, 0, (r1 - r0) * cell)
     ax.imshow(bg, extent=extent, interpolation="bilinear")
-    ax.contour(np.flipud(crowns[r0:r1, c0:c1] == tree_id), levels=[0.5], colors="#ffd400", linewidths=1.5, extent=extent)
+    if crowns is not None:
+        ax.contour(np.flipud(crowns[r0:r1, c0:c1] == tree_id), levels=[0.5], colors="#ffd400", linewidths=1.5, extent=extent)
+    if circle_m:
+        ang = np.linspace(0, 2 * np.pi, 90)
+        ax.plot((c - c0) * cell + circle_m * np.cos(ang), (r1 - r) * cell + circle_m * np.sin(ang), color="#ffd400", lw=1.8)
     w, h = extent[1], extent[3]
     ax.plot([0.05 * w, 0.05 * w + 10], [0.05 * h, 0.05 * h], color="white", linewidth=3)
     ax.text(0.05 * w + 5, 0.08 * h, "10 m", color="white", ha="center", fontsize=8, weight="bold")
@@ -677,89 +634,3 @@ def _field_section(a, s, slug, before):
         st.caption("Precision: of the trees the app put in a class, the share the field agreed with. Recall: of the "
                    "trees the field put in a class, the share the app had found.")
         result["trees"].to_csv(STORMS_DIR / slug / "field_confirmation.csv", index=False)
-
-
-# ---------------------------------------------------------------------------
-# Design criteria
-# ---------------------------------------------------------------------------
-def write_summary(table: pd.DataFrame, storms: list) -> str:
-    """results/summary.md: the criteria table and a plain-sentence storm section."""
-    lines = ["# TIMBER results summary", "",
-             f"Written {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC.", "",
-             "Goal: use only a consumer drone and free software to find which trees in a forest pose the greatest "
-             "fall risk to trails, roads and buildings.", "", "## Design criteria", "",
-             "| Criterion | Target | Measured | Status |", "|---|---|---|---|"]
-    lines += [f"| {r['what it means']} | {r['target']} | {r['measured']} | {r['status']} |" for _, r in table.iterrows()]
-    lines += ["", "## Storm check", "", WHY.replace("**", ""), ""]
-    done = 0
-    for s in storms:
-        path = STORMS_DIR / storm.storm_slug(s["name"]) / "storm_results.json"
-        if not path.exists():
-            continue
-        done += 1
-        r = json.loads(path.read_text(encoding="utf-8"))
-        c = r["counts"]
-        kind = "Calm pair" if s["is_calm_control"] else "Storm"
-        wind = f", peak gust {s['peak_gust_mps']} m/s" if s["peak_gust_mps"] else ""
-        lines.append(f"### {kind}: {s['name']} ({s['date_start']}{wind})")
-        lines.append(f"- Predictions frozen {r['frozen'].get('frozen_at_utc', '?')} UTC (fingerprint "
-                     f"{str(r['frozen'].get('combined', ''))[:16]}...); frozen before the storm: "
-                     f"{r['frozen'].get('frozen_before_storm')}.")
-        lines.append(f"- Alignment: sideways shift {r['alignment']['shift_m']:.2f} m, leftover height noise on stable "
-                     f"ground {r['alignment']['dsm']['rms_m']:.2f} m.")
-        lines.append(f"- Of {c['compared']} trees compared: {c['fallen']} fallen, {c['snapped top']} snapped top, "
-                     f"{c['crown damage']} crown damage; {r['new_logs']} new logs.")
-        sev = r["prediction"]["outcomes"]["severe"]
-        full = next((x for x in sev["auc"] if x["ranking"] == "full hazard score"), None)
-        if not s["is_calm_control"] and full and full["AUC"] is not None:
-            note = " (fewer than 10 damaged trees: treat as a count, not a statistic)" if sev["small_sample"] else ""
-            lines.append(f"- Frozen hazard score vs severe damage: AUC {full['AUC']:.2f} (95% range "
-                         f"{full['low 95%']:.2f} to {full['high 95%']:.2f}){note}.")
-        for row in r["direction"]["table"][:2]:
-            lines.append(f"- Fall direction, {row['model']}: median error {row['median error (°)']:.0f}° over "
-                         f"{row['trees']} trees.")
-        lines.append("")
-    if not done:
-        lines.append("No storm has been analyzed yet.")
-    lines += ["", f"_{DISCLAIMER}_", ""]
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    text = "\n".join(lines)
-    (RESULTS_DIR / "summary.md").write_text(text, encoding="utf-8")
-    return text
-
-
-def design_criteria(survey, layers, p, result):
-    st.write("The targets the system is judged against. Edit the targets in "
-             f"`{CONFIG_DIR / 'design_criteria.yaml'}`. A criterion shows **no data yet** until the analysis that "
-             "measures it has been run.")
-    table = validation.evaluate_criteria(validation.load_criteria(CONFIG_DIR), WORK_DIR)
-    icon = {"pass": "✅ pass", "fail": "❌ fail", "no data yet": "… no data yet"}
-    st.dataframe(table.assign(status=table["status"].map(icon)), hide_index=True, width="stretch")
-    st.caption("Storm criteria pool every analyzed storm (not calm pairs). The other project criteria (detection "
-               "rate, height error, field check, timing) are not built yet.")
-
-    if st.button("Export results for board", type="primary"):
-        storms = storm.load_storms(CONFIG_DIR)
-        write_summary(table, storms)
-        figures = RESULTS_DIR / "figures"
-        figures.mkdir(parents=True, exist_ok=True)
-        saved = ["summary.md"]
-        for s in storms:
-            slug = storm.storm_slug(s["name"])
-            for kind in ("auc", "rose"):
-                png = st.session_state.get(f"storm_{kind}_png_{slug}")
-                if png:
-                    (figures / f"storm_{slug}_{kind}.png").write_bytes(png)
-                    saved.append(f"figures/storm_{slug}_{kind}.png")
-            args = st.session_state.get(f"storm_map_args_{slug}")
-            if args:
-                with st.spinner(f"Drawing the change map of {s['name']}..."):
-                    (figures / f"storm_{slug}_change_map.png").write_bytes(maps.render_png(*args, True, 0.6, dpi=300))
-                saved.append(f"figures/storm_{slug}_change_map.png")
-        st.success(f"Saved in `{RESULTS_DIR}`: " + ", ".join(saved))
-        st.caption("Charts (300 dpi) are saved for the storms you opened in Storm check since TIMBER started: open "
-                   "each storm there once (and its 'Did we predict it?' and 'Fall direction' boxes), then export.")
-    summary = RESULTS_DIR / "summary.md"
-    if summary.exists():
-        with st.expander("results/summary.md"):
-            st.markdown(summary.read_text(encoding="utf-8"))

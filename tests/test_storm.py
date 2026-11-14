@@ -349,8 +349,8 @@ def test_storm_results_files_and_design_criteria(tmp_path):
     work = tmp_path
     criteria = validation.load_criteria(work / "config")
     table = validation.evaluate_criteria(criteria, work)
-    assert set(table["criterion"]) == {"storm_auc_severe", "storm_beats_baseline", "fall_direction_mae_deg",
-                                       "calm_false_change_rate"}
+    assert {"storm_auc_severe", "storm_beats_baseline", "fall_direction_mae_deg",
+            "calm_false_change_rate"} <= set(table["criterion"]) and len(table) == 12
     assert (table["status"] == "no data yet").all()  # no storms analyzed: no crash
 
     storms_dir = work / "results" / "storms"

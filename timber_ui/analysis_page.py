@@ -12,6 +12,7 @@ import time
 import streamlit as st
 
 from terrain import io
+from terrain import survey as survey_mod
 from terrain.apps import base as app_base
 from timber_ui import maps
 from timber_ui.paths import CACHE_DIR
@@ -39,9 +40,12 @@ def run_analysis(app_name: str, survey_key: str, run_key: str, _app, _layers, _p
     return result, time.time() - start
 
 
-def analysis_page(app, survey, title, subtitle, extra_parts=None):
+def analysis_page(app, survey, title, subtitle, extra_parts=None, part_extras=None, banner=DISCLAIMER):
     """extra_parts: {"title": function(survey, layers, settings, result)} adds more parts
-    after the app's own ones (the storm check and the design criteria use this)."""
+    after the app's own ones, or replaces one with the same title (the blind field
+    check, design criteria and storm check use this).
+    part_extras: {"title": function(...)} draws an extra box under one of the app's parts."""
+    st.warning(f"**{banner}**")
     st.title(title)
     st.caption(subtitle)
     if survey is None:
@@ -63,7 +67,8 @@ def analysis_page(app, survey, title, subtitle, extra_parts=None):
             st.caption("All numbers are **starting values — adjustable**. Change them, then press **Run analysis**.")
             if len(inspect.signature(app.params).parameters) > 1:  # apps that need the map size (forest defaults)
                 left, bottom, right, top = survey.dtm.bounds
-                p = app.params(st, {"width_m": max(right - left, top - bottom)})
+                p = app.params(st, {"width_m": max(right - left, top - bottom),
+                                    "season": survey_mod.read_info(survey.folder)["season"]})
             else:
                 p = app.params(st)
             st.form_submit_button("Run analysis", type="primary")
@@ -81,6 +86,9 @@ def analysis_page(app, survey, title, subtitle, extra_parts=None):
             st.error(f"Something went wrong running '{app.NAME}': {err}")
             return
     st.caption(f"Analysis ready in {seconds:.1f} s.")
+    st.session_state[f"{slug}_seconds"] = seconds if slug != "trees" else st.session_state.setdefault("tree_seconds", seconds)
+    if slug == "trees" and seconds > st.session_state["tree_seconds"]:
+        st.session_state["tree_seconds"] = seconds  # the full run, not a re-read of a saved result
     for w in result.warnings:
         st.warning(w, icon="⚠️")
 
@@ -95,13 +103,16 @@ def analysis_page(app, survey, title, subtitle, extra_parts=None):
         if result.metrics:
             show_metrics(result.metrics)
         # One part at a time (tabs would draw every part's map on each click, which is slow).
-        titles = [s.title for s in result.sections] + list(extra_parts or {})
+        own = [s.title for s in result.sections]
+        titles = own + [t for t in (extra_parts or {}) if t not in own]
         choice = st.segmented_control("Show", titles, default=titles[0], key=f"part_{slug}",
                                       label_visibility="collapsed") or titles[0]
         if extra_parts and choice in extra_parts:
             extra_parts[choice](survey, layers, p, result)
         else:
             show_section(slug, result.sections[titles.index(choice)], survey, view)
+        if part_extras and choice in part_extras:
+            part_extras[choice](survey, layers, p, result)
     else:
         sec = app_base.Section("Result", overlays=result.overlays, annotations=result.annotations,
                                table=result.table, table_title="Flagged areas")
@@ -111,7 +122,7 @@ def analysis_page(app, survey, title, subtitle, extra_parts=None):
 
     with st.expander("How to test this at home"):
         st.write(app.TEST_AT_HOME)
-    st.caption(DISCLAIMER)
+    st.caption(banner)
 
 
 def show_section(slug, sec, survey, view):

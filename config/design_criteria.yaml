@@ -1,0 +1,67 @@
+# TIMBER design criteria: the targets the system is judged against.
+# Edit the TARGETS here. "source" is the results file that holds the measured value.
+# compare: ">=" (measured must be at least the target), "<=" (at most), or "true".
+
+detection_rate:
+  description: Trees taller than 10 m found in check plots (app count / field count)
+  compare: '>='
+  target: 0.8
+  source: results/detection_plots.json
+height_rmse_m:
+  description: App tree height vs clinometer height, RMSE (m)
+  compare: <=
+  target: 1.5
+  source: results/field_check_results.json
+defect_rate_ratio:
+  description: Defect rate of high-hazard / low-hazard trees (blind field check)
+  compare: '>='
+  target: 2.0
+  source: results/field_check_results.json
+fisher_p:
+  description: High vs low hazard defect difference, Fisher's exact test p
+  compare: <=
+  target: 0.05
+  source: results/field_check_results.json
+beats_baseline:
+  description: 'Field check: full score AUC is higher than every baseline AUC'
+  compare: 'true'
+  target: true
+  source: results/field_check_results.json
+log_factor_test_p:
+  description: Downed logs lie on higher-hazard ground than random forest points (p)
+  compare: <=
+  target: 0.05
+  source: results/log_validation.json
+hectares_per_hour:
+  description: Hectares surveyed per hour (person time + compute time)
+  compare: '>='
+  target: 10
+  source: results/timing.json
+storm_auc_severe:
+  description: 'Storm check: AUC of the frozen hazard score for fallen or snapped
+    trees (pooled)'
+  compare: '>='
+  target: 0.7
+  source: results/storms/pooled_results.json
+storm_beats_baseline:
+  description: 'Storm check: full score AUC is higher than the ''tallest first'' baseline'
+  compare: 'true'
+  target: true
+  source: results/storms/pooled_results.json
+fall_direction_mae_deg:
+  description: 'Storm check: median error of the predicted fall direction, actual-wind
+    model (degrees)'
+  compare: <=
+  target: 45
+  source: results/storms/pooled_results.json
+calm_false_change_rate:
+  description: 'Calm pairs: share of trees falsely flagged as damaged'
+  compare: <=
+  target: 0.01
+  source: results/storms/pooled_results.json
+weight_stability_top20:
+  description: 'Sensitivity: mean share of the top 20 trees kept across random weight
+    sets'
+  compare: '>='
+  target: 0.75
+  source: results/sensitivity.json

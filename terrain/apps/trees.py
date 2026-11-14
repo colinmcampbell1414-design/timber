@@ -44,10 +44,12 @@ SETTING_TABS = ["Basic", "Tree detection", "Hazard weights", "Factor start point
 
 def params(st, info=None) -> dict:
     """Sliders, grouped in tabs: "Basic" has the few settings most people change,
-    the other tabs hold the advanced ones. `info` = {"width_m": map width} sets
-    forest starting values for big maps."""
+    the other tabs hold the advanced ones. `info` = {"width_m": map width, "season":
+    the orthophoto's season} sets forest starting values for big maps and the
+    health settings for the season."""
     big_map = bool(info and info.get("width_m", 0) > 100)
-    p = {}
+    season = (info or {}).get("season") or "summer leaf-on"
+    p = {"season": season}
     basic, detect, weights, points, direction, features = st.tabs(SETTING_TABS)
 
     with basic:
@@ -102,7 +104,10 @@ def params(st, info=None) -> dict:
         cols = st.columns(4)
         p["weights"] = {}
         for i, name in enumerate(treefall.FACTORS):
-            p["weights"][name] = cols[i % 4].slider(f"Weight: {name}", 0.0, 1.0, treefall.DEFAULT_WEIGHTS[name], 0.05)
+            p["weights"][name] = cols[i % 4].slider(f"Weight: {name}", 0.0, 1.0, default_weights(season)[name], 0.05,
+                                                    key=f"weight_{name}_{season}")
+        if season != "summer leaf-on":
+            st.caption(SEASON_NOTES[season])
 
     with points:
         st.caption("Each factor is 0 until its start point and rises to 1 at its full point, so an ordinary "
@@ -201,6 +206,28 @@ def params(st, info=None) -> dict:
     return p
 
 
+# Every part of the Tree hazard page, in order. The first five are built in run();
+# "Design criteria" and "Storm check" are added by the page (timber_ui).
+TREE_TABS = ["Trees & hazard", "Where trees could fall", "Features at risk", "Downed logs", "Field check",
+             "Design criteria", "Storm check"]
+
+SEASON_NOTES = {
+    "autumn color": "Orthophoto season: autumn color. Healthy trees look 'stressed' when their leaves turn, so the "
+                    "health weight starts at 0.05 and 'possibly dead' uses only the snag rule (among the least "
+                    "green 5% of crowns and a small crown for its height).",
+    "leaf-off": "Orthophoto season: leaf-off. Bare crowns can't show health, so the health factor and 'possibly "
+                "dead' are switched off (the other weights are rescaled). Use a leaf-on photo to get them back.",
+}
+
+
+def default_weights(season: str = "summer leaf-on") -> dict:
+    """Starting hazard weights for the photo's season: in autumn the health weight drops to 0.05."""
+    weights = dict(treefall.DEFAULT_WEIGHTS)
+    if season == "autumn color":
+        weights["health"] = 0.05
+    return weights
+
+
 def canopy_height(layers) -> np.ndarray:
     """Canopy height model: CHM = DSM - DTM (height of things above the ground)."""
     chm = layers.dsm.data - layers.dtm.data
@@ -242,6 +269,8 @@ def run(layers, p) -> Result:
              "brightness": np.max(layers.ortho, axis=2) if layers.ortho is not None else None}
     if layers.ortho is None:
         warnings.append("No orthophoto: tree health, 'possibly dead', green/paved checks are left out.")
+    elif p.get("season", "summer leaf-on") in SEASON_NOTES:
+        warnings.append(SEASON_NOTES[p["season"]])
     targets = _targets_mask(layers)
     # The slow part. Remembered on disk per survey + settings + marked targets (see Layers.remember).
     res = layers.remember("trees", (sorted(p.items(), key=str), repr(layers.shapes.get("targets", []))),
@@ -250,7 +279,15 @@ def run(layers, p) -> Result:
     if len(trees) == 0:
         return Result(warnings=warnings + ["No trees found. Try a lower minimum height or less smoothing."])
     # Simple rankings to compare the hazard score with (tallest first, random order...).
-    trees = res["trees"] = validation.add_baselines(trees, p.get("baseline_seed", 42))
+    trees = validation.add_baselines(trees, p.get("baseline_seed", 42))
+    # Where each tree is: latitude/longitude, and how to walk to it from the nearest trail or road.
+    if "latitude" not in trees and layers.dtm.crs is not None:
+        lon, lat = io.map_to_latlon(trees["x"].to_numpy(), trees["y"].to_numpy(), layers.dtm.crs)
+        trees["latitude"], trees["longitude"] = np.round(lat, 7), np.round(lon, 7)
+    paths = res["masks"].get("trail", np.zeros(chm.shape, dtype=bool)) | res["masks"].get("road", np.zeros(chm.shape, dtype=bool))
+    trees["trail_dist_m"], trees["trail_bearing_deg"] = validation.nearest_on_mask(trees["x"], trees["y"], paths,
+                                                                                    layers.dtm.transform)
+    res["trees"] = trees
 
     trees["class_num"] = trees["class"].map({"low": 0, "moderate": 1, "high": 2})
     table = _tree_table(trees, list(res["masks"]))
@@ -311,6 +348,7 @@ def _tops_scatter(trees, only=None):
 
 
 def _section_trees(layers, res, trees, table):
+    """The 'Trees & hazard' part: crowns colored by class or score, tree tops, the priority table."""
     crowns = res["crowns"]
     canopy = canopy_height(layers)
     overlays = [
@@ -347,6 +385,7 @@ def _upsample(grid, k, shape):
 
 
 def _section_fall(layers, res, trees):
+    """The 'Where trees could fall' part: exposure and reach maps, direction arrows, GeoTIFF downloads."""
     k = res["grid_factor"]
     shape = layers.dtm.shape
     valid = np.isfinite(layers.dtm.data)
@@ -382,6 +421,7 @@ def _section_fall(layers, res, trees):
 
 
 def _feature_overlay(masks, shape):
+    """One grid with a number per feature type, plus its legend entries."""
     grid = np.full(shape, np.nan)
     classes = []
     for value, (name, label, color) in enumerate(FEATURE_STYLE, start=1):
@@ -392,6 +432,7 @@ def _feature_overlay(masks, shape):
 
 
 def _section_features(layers, res, trees):
+    """The 'Features at risk' part: detected features and how many trees can reach each."""
     masks = res["masks"]
     grid, classes = _feature_overlay(masks, layers.dtm.shape)
     rows = []
@@ -420,6 +461,7 @@ def _section_features(layers, res, trees):
 
 
 def _section_logs(layers, res, trees, grids, cell):
+    """The 'Downed logs' part: detected logs with their axis, and logs vs random spots."""
     logs = res["logs"]
     k = res["grid_factor"]
     exposure_full = _upsample(res["exposure"], k, layers.dtm.shape)
@@ -450,6 +492,7 @@ def _section_logs(layers, res, trees, grids, cell):
 
 
 def _section_field(layers, trees):
+    """The original (not blind) field sheet. The page shows the blind field check instead."""
     crs = layers.dtm.crs
 
     def custom(st):

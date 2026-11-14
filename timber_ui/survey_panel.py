@@ -1,11 +1,14 @@
 """Sidebar: choose a survey and how it is prepared. Every page uses the result."""
 
+import dataclasses
 import time
+
+import numpy as np
 
 import rasterio
 import streamlit as st
 
-from terrain import io, survey as survey_mod
+from terrain import fusion, hydrology, io, survey as survey_mod
 from timber_ui.paths import CACHE_DIR, DATA_ROOT, survey_folders
 
 
@@ -94,8 +97,64 @@ def sidebar() -> survey_mod.Survey | None:
     s.folder = folder
     # How this survey was prepared (the storm check prepares the same grid again later).
     s.settings = {"cell_size": cell_cm / 100, "pit_depth": pit_depth if repair else None, "detrend": detrend}
+    s.own_dtm = s.dtm  # this survey's own ground model, kept for the DTM comparison
+    source = dtm_source_picker(folder)
+    if source is not None and s.dsm is not None:
+        label, path, units = source
+        try:
+            with st.spinner(f"Fitting the ground model from {label} to this survey..."):
+                fused = load_fused(version, str(path), path.stat().st_mtime, units, label, s)
+            fused.key, fused.folder, fused.settings, fused.own_dtm = f"{version}_{label}_{units}", folder, s.settings, s.dtm
+            r = fused.info["dtm_report"]
+            st.sidebar.caption(f"Ground model from **{label}**: offset {r['offset_before_m']:+.2f} m and tilt "
+                               f"{r['tilt_deg']:.2f}° removed; {r['rms_after_m']:.2f} m of noise left on stable ground.")
+            s = fused
+        except Exception as err:
+            st.sidebar.error(f"Could not use that ground model: {err}")
     flight_notes(folder)
     return s
+
+
+def dtm_sources(folder) -> dict:
+    """Other ground models that could be used with this survey: the DTM of every other
+    survey folder, and any GeoTIFF in data/outside_dtm (e.g. public lidar)."""
+    out = {}
+    for other in survey_folders():
+        files = survey_mod.find_files(other)
+        if other != folder and files["dtm"] is not None and other.name != "outside_dtm":
+            out[f"survey: {other.name}"] = files["dtm"]
+    outside = DATA_ROOT / "outside_dtm"
+    for path in sorted(outside.glob("*.tif*")) if outside.exists() else []:
+        out[f"outside: {path.name}"] = path
+    return out
+
+
+def dtm_source_picker(folder):
+    """Sidebar box: use this survey's own ground model, or one from another survey / outside file."""
+    sources = dtm_sources(folder)
+    with st.sidebar.expander("Ground model (DTM) source"):
+        st.caption("Leaf-on drone surveys can't see the ground under trees. A leaf-off survey of the same place, or "
+                   "public lidar (put the GeoTIFF in data/outside_dtm), gives a better ground model. It is lined up "
+                   "with this survey on stable open ground.")
+        choice = st.selectbox("Ground model from", ["this survey"] + list(sources), key=f"dtm_source_{folder.name}")
+        units = st.selectbox("Height units of that file", fusion.UNIT_CHOICES, key=f"dtm_units_{folder.name}",
+                             help="Auto reads the file's coordinate system. Lidar from US agencies is often in feet.")
+    if choice == "this survey":
+        return None
+    return choice, sources[choice], "auto" if units.startswith("auto") else units
+
+
+@st.cache_resource(show_spinner=False, max_entries=2)
+def load_fused(version: str, path: str, mtime: float, units: str, label: str, _survey):
+    """The survey with its ground model replaced by another one (aligned), and the water flow redone."""
+    s = _survey
+    cell = s.dtm.pixel_size[0]
+    other = fusion.to_grid(io.load_raster(path), s.dtm, units)
+    aligned, report = fusion.align_dtm(other.data, s.dtm.data, s.dsm.data, cell)
+    # Where the other model has no data, this survey's own ground is kept.
+    dtm = io.Raster(data=np.where(np.isfinite(aligned), aligned, s.dtm.data), transform=s.dtm.transform, crs=s.dtm.crs)
+    flow = hydrology.analyze_flow(dtm.data, *dtm.pixel_size)
+    return dataclasses.replace(s, dtm=dtm, flow=flow, info={**s.info, "dtm_source": label, "dtm_report": report})
 
 
 def flight_notes(folder):
