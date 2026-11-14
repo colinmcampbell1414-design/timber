@@ -24,6 +24,10 @@ try {
     Pop-Location
 }
 
+# build\ is only PyInstaller's scratch space. Its TIMBER.exe cannot run (no _internal
+# folder), so remove it: the only TIMBER.exe left is the working one in dist\TIMBER.
+Remove-Item (Join-Path $PSScriptRoot "build") -Recurse -Force -ErrorAction SilentlyContinue
+
 $dist = Join-Path $PSScriptRoot "dist\TIMBER"
 Set-Content -Path (Join-Path $dist "portable.txt") -Encoding utf8 -Value @(
     "This file makes TIMBER portable: surveys (data\), saved results (cache\) and timber.log",
